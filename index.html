@@ -10,6 +10,13 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics-compat.js"></script>
+
+<!-- Microsoft MSAL – Azure AD / Microsoft Graph token acquisition -->
+<script src="https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"
+  onerror="console.error('❌ MSAL failed to load from unpkg. Trying jsDelivr fallback…');
+           var s=document.createElement('script');
+           s.src='https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js';
+           document.head.appendChild(s);"></script>
 <style>
 :root {
   --navy:    #0f0f1a;
@@ -580,10 +587,9 @@ let _mailData   = [];
 let _usersData  = { ...DEFAULT_USERS };
 let _settingsData = {
   azure: {
-    tenantId: '',
-    applicationId: '',
-    clientSecret: '',
-    senderEmail: 'noreply@company.com',
+    msClientId: '',
+    msTenantId: '',
+    msToEmail: '',
     senderName: 'PlantVisit System'
   },
   notification: {
@@ -1242,46 +1248,107 @@ function closeModal() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   MAIL LOG — with direct links
+   MICROSOFT GRAPH API HELPER (MSAL delegated flow)
+   – Uses Azure AD MSAL popup/silent for token acquisition
+     + Microsoft Graph /me/sendMail endpoint
 ══════════════════════════════════════════════════════════ */
+
+// ── MSAL singleton cache (one instance per clientId+tenantId) ──────────
+// Prevents "interaction_in_progress" errors caused by multiple MSAL instances
+// writing conflicting auth state to localStorage.
+const _msalInstances = {};
+
+/**
+ * getMSGraphToken()
+ * Acquires a delegated access token from Azure AD using MSAL popup/silent flow.
+ * Requires: { msClientId, msTenantId }
+ */
+async function getMSGraphToken(cfg) {
+  if (typeof msal === 'undefined') {
+    throw new Error(
+      'MSAL library failed to load. Please check your internet connection and try refreshing the page. ' +
+      'If the problem persists, ensure your network allows access to unpkg.com or cdn.jsdelivr.net.'
+    );
+  }
+  if (!cfg.msClientId || !cfg.msTenantId) {
+    throw new Error('Azure App (Client) ID and Tenant ID are required.');
+  }
+
+  // Use the full page URL as redirectUri — register THIS exact URL in Azure AD under:
+  //   App registrations → Authentication → Redirect URIs (type: Single-page application)
+  const redirectUri = window.location.href.split('?')[0].split('#')[0];
+  console.info(`ℹ️  Azure AD Redirect URI to register: ${redirectUri}`);
+
+  const cacheKey = `${cfg.msClientId}::${cfg.msTenantId}`;
+  if (!_msalInstances[cacheKey]) {
+    const msalConfig = {
+      auth: {
+        clientId:  cfg.msClientId,
+        authority: `https://login.microsoftonline.com/${cfg.msTenantId}`,
+        redirectUri,
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+    };
+    const inst = new msal.PublicClientApplication(msalConfig);
+    await inst.initialize();
+    _msalInstances[cacheKey] = inst;
+    console.log(`🔑 MSAL instance created — redirectUri: ${redirectUri}`);
+  }
+  const msalInstance = _msalInstances[cacheKey];
+
+  const request = { scopes: ['Mail.Send', 'User.Read'] };
+
+  // Try silent first (uses cached token)
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length > 0) {
+    try {
+      const silentResult = await msalInstance.acquireTokenSilent({ ...request, account: accounts[0] });
+      return silentResult.accessToken;
+    } catch (_) { /* fall through to popup */ }
+  }
+  // Interactive popup login
+  const popupResult = await msalInstance.loginPopup(request);
+  return popupResult.accessToken;
+}
+
+/**
+ * sendGraphMail(accessToken, { toEmail, subject, htmlBody })
+ * POST to Microsoft Graph /me/sendMail
+ */
+async function sendGraphMail(accessToken, { toEmail, subject, htmlBody }) {
+  const body = {
+    message: {
+      subject,
+      body: { contentType: 'HTML', content: htmlBody },
+      toRecipients: [{ emailAddress: { address: toEmail } }],
+    },
+    saveToSentItems: true,
+  };
+  const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Graph API error ${res.status}: ${errText}`);
+  }
+}
+
+/**
+ * sendGraphEmail(toEmail, subject, bodyHtml)
+ * High-level wrapper used by logMail() — acquires token then sends.
+ */
 async function sendGraphEmail(toEmail, subject, bodyHtml) {
   const az = _settingsData.azure || {};
-  if (!az.tenantId || !az.applicationId || !az.clientSecret || !az.senderEmail) return false;
+  if (!az.msClientId || !az.msTenantId) return false;
   try {
-    // Step 1: Acquire access token via client credentials flow
-    const tokenRes = await fetch(`https://login.microsoftonline.com/${az.tenantId}/oauth2/v2.0/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: az.applicationId,
-        client_secret: az.clientSecret,
-        scope: 'https://graph.microsoft.com/.default'
-      })
-    });
-    if (!tokenRes.ok) return false;
-    const tokenData = await tokenRes.json();
-    const accessToken = tokenData.access_token;
-    if (!accessToken) return false;
-
-    // Step 2: Send email via Microsoft Graph
-    const mailRes = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(az.senderEmail)}/sendMail`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: {
-          subject,
-          body: { contentType: 'HTML', content: bodyHtml },
-          toRecipients: toEmail.split(',').map(e => ({ emailAddress: { address: e.trim() } })),
-          from: { emailAddress: { address: az.senderEmail, name: az.senderName || 'PlantVisit System' } }
-        },
-        saveToSentItems: false
-      })
-    });
-    return mailRes.status === 202;
+    const accessToken = await getMSGraphToken({ msClientId: az.msClientId, msTenantId: az.msTenantId });
+    await sendGraphMail(accessToken, { toEmail, subject, htmlBody: bodyHtml });
+    return true;
   } catch(e) {
     console.error('Graph API email error:', e);
     return false;
@@ -1293,7 +1360,8 @@ function logMail(record, isUpdate) {
   const appUrl = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
   const directLink = `${appUrl}?visit=${record.id}`;
   const subject = `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${record.visitDate}`;
-  const toAddr  = (_settingsData.notification?.managementEmail || 'management@company.com');
+  const az      = _settingsData.azure || {};
+  const toAddr  = az.msToEmail || _settingsData.notification?.managementEmail || 'management@company.com';
   const bodyHtml = `<p><strong>${isUpdate ? 'Visit Updated' : 'New Visit Scheduled'}</strong></p>
 <table border="0" cellpadding="6" style="font-family:sans-serif;font-size:14px">
   <tr><td><strong>Company</strong></td><td>${record.company}</td></tr>
@@ -1307,10 +1375,9 @@ function logMail(record, isUpdate) {
 <p><a href="${directLink}">View Visit Record →</a></p>`;
 
   // Attempt real send via Microsoft Graph API (fires-and-forgets)
-  const az = _settingsData.azure || {};
-  if (az.tenantId && az.applicationId && az.clientSecret && az.senderEmail) {
-    sendGraphEmail(toAddr, subject, bodyHtml).then(ok => {
-      if (ok) toast('📧 Email Sent', `Notification sent via Microsoft Graph to ${toAddr}`);
+  if (az.msClientId && az.msTenantId && az.msToEmail) {
+    sendGraphEmail(az.msToEmail, subject, bodyHtml).then(ok => {
+      if (ok) toast('📧 Email Sent', `Notification sent via Microsoft Graph to ${az.msToEmail}`);
     });
   }
 
@@ -1336,11 +1403,11 @@ function renderMail(el) {
     <div class="section-title">Mail Notification Log</div>
     <div class="section-sub">Microsoft Graph API · auto-sent on every create/update</div>
   </div>
-  <div class="alert alert-warn" style="margin-bottom:18px">
-    ⚠ This is a demo — emails are <strong>simulated and logged locally</strong>.
-    In production, actual emails are sent via Microsoft Graph API using your Azure App Registration.
-    Each notification includes a <strong>direct-access link</strong> so plant users can open records instantly.
-  </div>
+  ${(()=>{const az=_settingsData.azure||{};
+    return az.msClientId&&az.msTenantId&&az.msToEmail
+      ? `<div class="alert alert-info" style="margin-bottom:18px">✅ Microsoft Graph API is configured — emails are sent live via MSAL delegated sign-in to <strong>${xe(az.msToEmail)}</strong>. Each notification includes a <strong>direct-access link</strong> so plant users can open records instantly.</div>`
+      : `<div class="alert alert-warn" style="margin-bottom:18px">⚙ Microsoft Graph API is not configured yet. Go to <strong>Settings → Microsoft Graph API</strong> and enter your Azure App Client ID, Tenant ID and recipient email to enable live email notifications.</div>`;
+  })()}
   <div class="card">
     <div class="card-header">
       <div class="card-title">Sent Notifications (${logs.length})</div>
@@ -1355,7 +1422,7 @@ function renderMail(el) {
         <div class="mail-meta">To: ${xe(m.to)}</div>
         <div class="mail-meta">${xe(m.body)}</div>
         ${m.directLink?`<div class="mail-meta" style="margin-top:4px">🔗 Direct link: <span class="mail-link" onclick="copyDirectLink('${xe(m.directLink)}')" title="Click to copy">${xe(m.directLink)}</span></div>`:''}
-        <div class="mail-sent">✓ Queued via Azure Communication Services · ${m.time}</div>
+        <div class="mail-sent">✓ Sent via Microsoft Graph API · ${m.time}</div>
       </div>
     </div>`).join('')}
   </div>`;
@@ -1412,68 +1479,95 @@ function renderAzureSettings(el) {
   <div class="card">
     <div class="card-header"><div class="card-title">Microsoft Graph API</div><span class="badge badge-medium">Email Channel</span></div>
     <div class="alert alert-info" style="margin-bottom:20px">
-      🔗 Configure Microsoft Graph API via Azure App Registration to enable email notifications. Find these values in <strong>Azure Portal → App Registrations → Your App</strong>.
+      🔗 Configure Microsoft Graph API via Azure App Registration to enable email notifications.
+      This uses <strong>MSAL delegated sign-in</strong> (popup) — no client secret required.
+      Find these values in <strong>Azure Portal → App Registrations → Your App</strong>.
+    </div>
+    <div class="alert alert-warn" style="margin-bottom:20px;font-size:12px">
+      ⚙ <strong>Azure AD Setup:</strong>
+      <ol style="margin:8px 0 0 16px;line-height:1.7">
+        <li>App registrations → New registration → Single-page application</li>
+        <li>Set Redirect URI to: <code style="font-size:11px;background:var(--navy4);padding:1px 6px;border-radius:4px">${window.location.href.split('?')[0].split('#')[0]}</code></li>
+        <li>API permissions → Microsoft Graph → Delegated → <code style="font-size:11px;background:var(--navy4);padding:1px 6px;border-radius:4px">Mail.Send</code> + <code style="font-size:11px;background:var(--navy4);padding:1px 6px;border-radius:4px">User.Read</code> → Grant admin consent</li>
+      </ol>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Azure AD — App Registration</div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Directory (Tenant) ID</div><div class="settings-row-sub">Azure Portal → App Registrations → Your App → Overview</div></div>
-        <div class="settings-row-right">
-          <input type="text" class="settings-input mono" id="az_tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.tenantId||'')}">
-        </div>
-      </div>
-      <div class="settings-row">
         <div><div class="settings-row-label">Application (Client) ID</div><div class="settings-row-sub">Azure Portal → App Registrations → Your App → Overview</div></div>
         <div class="settings-row-right">
-          <input type="text" class="settings-input mono" id="az_app_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.applicationId||'')}">
+          <input type="text" class="settings-input mono" id="az_client_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.msClientId||'')}">
         </div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Client Secret</div><div class="settings-row-sub">Azure Portal → App Registrations → Certificates &amp; secrets → Client secrets → Value</div></div>
+        <div><div class="settings-row-label">Directory (Tenant) ID</div><div class="settings-row-sub">Azure Portal → App Registrations → Your App → Overview</div></div>
         <div class="settings-row-right">
-          <input type="password" class="settings-input mono" id="az_client_secret" placeholder="Client secret value" value="${xe(az.clientSecret||'')}">
+          <input type="text" class="settings-input mono" id="az_tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.msTenantId||'')}">
         </div>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Sender Identity</div>
+      <div class="settings-section-title">Notification Recipient</div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Sender Email</div><div class="settings-row-sub">Microsoft 365 mailbox address used to send notifications (must have Mail.Send permission)</div></div>
-        <div class="settings-row-right"><input type="email" class="settings-input" id="az_sender_email" placeholder="noreply@yourdomain.com" value="${xe(az.senderEmail||'')}"></div>
+        <div><div class="settings-row-label">Recipient Email (To)</div><div class="settings-row-sub">Email address that receives visit notifications</div></div>
+        <div class="settings-row-right"><input type="email" class="settings-input" id="az_to_email" placeholder="management@yourdomain.com" value="${xe(az.msToEmail||'')}"></div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Sender Display Name</div><div class="settings-row-sub">Name shown in notification emails</div></div>
+        <div><div class="settings-row-label">Sender Display Name</div><div class="settings-row-sub">Name shown in notification emails (sent from the signed-in Microsoft account)</div></div>
         <div class="settings-row-right"><input type="text" class="settings-input" id="az_sender_name" placeholder="PlantVisit System" value="${xe(az.senderName||'')}"></div>
       </div>
     </div>
+    <div id="az_test_status" style="display:none;margin-bottom:12px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-      <button class="btn btn-ghost" onclick="testAzureConnection()">⚡ Test Connection</button>
+      <button class="btn btn-ghost" onclick="testGraphConnection()">⚡ Send Test Email</button>
       <button class="btn btn-gold" onclick="saveAzureSettings()">✓ Save Graph API Config</button>
     </div>
   </div>`;
 }
 function saveAzureSettings() {
   _settingsData.azure = {
-    tenantId:      document.getElementById('az_tenant_id').value.trim(),
-    applicationId: document.getElementById('az_app_id').value.trim(),
-    clientSecret:  document.getElementById('az_client_secret').value.trim(),
-    senderEmail:   document.getElementById('az_sender_email').value.trim(),
-    senderName:    document.getElementById('az_sender_name').value.trim(),
+    msClientId:  document.getElementById('az_client_id').value.trim(),
+    msTenantId:  document.getElementById('az_tenant_id').value.trim(),
+    msToEmail:   document.getElementById('az_to_email').value.trim(),
+    senderName:  document.getElementById('az_sender_name').value.trim(),
   };
   saveSettings();
   toast('✓ Graph API Config Saved', 'Microsoft Graph API configuration updated successfully.');
 }
 
-function testAzureConnection() {
-  const tenantId     = document.getElementById('az_tenant_id').value.trim();
-  const appId        = document.getElementById('az_app_id').value.trim();
-  const clientSecret = document.getElementById('az_client_secret').value.trim();
-  if (!tenantId || !appId || !clientSecret) {
-    toast('Config Missing', 'Please enter Tenant ID, Application ID and Client Secret first.', true);
+async function testGraphConnection() {
+  const clientId = document.getElementById('az_client_id').value.trim();
+  const tenantId = document.getElementById('az_tenant_id').value.trim();
+  const toEmail  = document.getElementById('az_to_email').value.trim();
+  const statusEl = document.getElementById('az_test_status');
+
+  if (!clientId || !tenantId) {
+    toast('Config Missing', 'Please enter Application (Client) ID and Tenant ID first.', true);
     return;
   }
-  toast('Testing…', 'Validating Microsoft Graph API credentials…');
-  setTimeout(() => toast('⚠ Demo Mode', 'Live token validation requires a server-side proxy. Save your config and test via your backend.'), 1800);
+  if (!toEmail) {
+    toast('Config Missing', 'Please enter a Recipient Email address first.', true);
+    return;
+  }
+
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = `<div class="alert alert-info">⏳ Acquiring token — a Microsoft sign-in popup may appear…</div>`;
+
+  try {
+    const accessToken = await getMSGraphToken({ msClientId: clientId, msTenantId: tenantId });
+    const htmlBody = `<p>Hello,</p><p>This is a test email sent from <strong>PlantVisit</strong> via Microsoft Graph API on ${new Date().toLocaleString('en-IN')}.</p><p>Your Microsoft Graph email integration is working correctly.</p><p>— PlantVisit System</p>`;
+    await sendGraphMail(accessToken, {
+      toEmail,
+      subject: 'PlantVisit – Microsoft Graph Email Test',
+      htmlBody,
+    });
+    statusEl.innerHTML = `<div class="alert alert-good" style="color:var(--green);background:var(--green-bg);border:1px solid rgba(90,191,122,.2)">✅ Test email delivered to ${toEmail}</div>`;
+    toast('📧 Test Sent', `Test email successfully delivered to ${toEmail}`);
+  } catch (err) {
+    statusEl.innerHTML = `<div class="alert alert-warn">❌ Failed: ${err?.message || String(err)}</div>`;
+    toast('Test Failed', err?.message || String(err), true);
+  }
+  setTimeout(() => { statusEl.style.display = 'none'; }, 8000);
 }
 
 function renderNotificationSettings(el) {
