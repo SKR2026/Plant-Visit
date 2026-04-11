@@ -607,14 +607,16 @@ let _appReady   = false;
 let _pendingVisitId = null; // for direct-link navigation
 
 /* ══════════════════════════════════════════════════════════
-   URL PARAMS — direct link access
+   URL PARAMS — direct link access (no-login guest entry)
 ══════════════════════════════════════════════════════════ */
 (function checkDirectLink() {
-  const params = new URLSearchParams(window.location.search);
+  const params  = new URLSearchParams(window.location.search);
   const visitId = params.get('visit');
   if (visitId) {
     _pendingVisitId = visitId;
-    document.getElementById('loginDirectInfo').style.display = 'block';
+    // Auto-login as guest — no password required when coming via email link
+    // autoLoginGuest() waits for Firestore to be ready before activating
+    document.addEventListener('DOMContentLoaded', () => autoLoginGuest(visitId));
   }
 })();
 
@@ -700,43 +702,34 @@ function bootApp() {
 /* ══════════════════════════════════════════════════════════
    LOGIN / LOGOUT / AUTH
 ══════════════════════════════════════════════════════════ */
-function doLogin() {
-  const username = document.getElementById('loginUser').value.trim().toLowerCase();
-  const password = document.getElementById('loginPass').value;
-  const errEl = document.getElementById('loginErr');
-  errEl.classList.remove('show');
 
-  // If Firebase hasn't loaded yet, try against DEFAULT_USERS directly as fallback
-  const user = _usersData[username] || DEFAULT_USERS[username];
-  if (!user || user.password !== password) {
-    errEl.classList.add('show');
-    document.getElementById('loginPass').value = '';
-    return;
-  }
+/**
+ * activateSession(user, id, visitId?)
+ * Shows the app UI for a given user. Called by doLogin() and
+ * autoLoginGuest() so both paths share the same show-app logic.
+ */
+function activateSession(user, id, visitId) {
+  currentUser = { ...user, id };
 
-  currentUser = { ...user, id: username };
-  localStorage.setItem('pv_session', JSON.stringify({ id: username, name: user.name }));
-
-  // Show app
+  // Show app chrome
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('appHeader').style.display = 'flex';
   document.getElementById('appNav').style.display = 'flex';
   document.getElementById('mainContent').style.display = 'block';
 
-  // Update header
+  // Update header identity
   document.getElementById('userAvatar').textContent = user.initials;
   document.getElementById('userName').textContent = user.name;
   document.getElementById('userRole').textContent = user.role;
 
-  // Show settings & mail tabs for admin
+  // Tab visibility
   document.getElementById('tab-settings').style.display = currentUser.access === 'admin' ? '' : 'none';
   document.getElementById('tab-mail').style.display = currentUser.access === 'plant' ? 'none' : '';
 
   updateBadges();
 
-  // Handle direct link
-  if (_pendingVisitId) {
-    const visitId = _pendingVisitId;
+  // Navigate — if a visitId was supplied, go straight to that record
+  if (visitId) {
     _pendingVisitId = null;
     showTab('records');
     setTimeout(() => {
@@ -754,6 +747,56 @@ function doLogin() {
   } else {
     showTab('dashboard');
   }
+}
+
+/**
+ * autoLoginGuest(visitId)
+ * Called when the page is opened via a notification email link (?visit=…).
+ * Bypasses the login screen and opens the app as a read-only viewer,
+ * jumping straight to the visit record. Waits for Firestore data if needed.
+ */
+function autoLoginGuest(visitId) {
+  const GUEST = {
+    name: 'Guest Viewer', initials: 'GV', role: 'View Only',
+    access: 'management', plant: null, password: '', email: ''
+  };
+
+  // If Firestore data is already loaded, open immediately; otherwise wait.
+  if (_appReady) {
+    activateSession(GUEST, '__guest__', visitId);
+  } else {
+    // Poll until bootApp() sets _appReady, then activate
+    const poll = setInterval(() => {
+      if (_appReady) {
+        clearInterval(poll);
+        activateSession(GUEST, '__guest__', visitId);
+      }
+    }, 100);
+    // Fallback: force-open after 4 s even if Firestore is slow
+    setTimeout(() => {
+      clearInterval(poll);
+      if (!currentUser) activateSession(GUEST, '__guest__', visitId);
+    }, 4000);
+  }
+}
+
+function doLogin() {
+  const username = document.getElementById('loginUser').value.trim().toLowerCase();
+  const password = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginErr');
+  errEl.classList.remove('show');
+
+  // Try against live Firestore users first, fall back to DEFAULT_USERS
+  const user = _usersData[username] || DEFAULT_USERS[username];
+  if (!user || user.password !== password) {
+    errEl.classList.add('show');
+    document.getElementById('loginPass').value = '';
+    return;
+  }
+
+  localStorage.setItem('pv_session', JSON.stringify({ id: username, name: user.name }));
+  activateSession(user, username, _pendingVisitId || null);
+  _pendingVisitId = null;
 }
 
 function doLogout() {
@@ -1356,23 +1399,195 @@ async function sendGraphEmail(toEmail, subject, bodyHtml) {
 }
 
 function logMail(record, isUpdate) {
-  const logs = loadMail();
-  const appUrl = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
+  const logs    = loadMail();
+  const appUrl  = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
   const directLink = `${appUrl}?visit=${record.id}`;
+  const company = _settingsData?.app?.companyName || 'PlantVisit';
   const subject = `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${record.visitDate}`;
   const az      = _settingsData.azure || {};
   const toAddr  = az.msToEmail || _settingsData.notification?.managementEmail || 'management@company.com';
-  const bodyHtml = `<p><strong>${isUpdate ? 'Visit Updated' : 'New Visit Scheduled'}</strong></p>
-<table border="0" cellpadding="6" style="font-family:sans-serif;font-size:14px">
-  <tr><td><strong>Company</strong></td><td>${record.company}</td></tr>
-  <tr><td><strong>Plant</strong></td><td>${record.plant}</td></tr>
-  <tr><td><strong>Visit Date</strong></td><td>${record.visitDate}</td></tr>
-  <tr><td><strong>Category</strong></td><td>${record.category}</td></tr>
-  <tr><td><strong>Criticality</strong></td><td>${record.criticality}</td></tr>
-  <tr><td><strong>Coordinator</strong></td><td>${record.coordinator}</td></tr>
-  <tr><td><strong>Status</strong></td><td>${record.status}</td></tr>
-</table>
-<p><a href="${directLink}">View Visit Record →</a></p>`;
+
+  // ── Criticality colour map ────────────────────────────────────────────
+  const CRIT_COLOR = { Critical:'#e05555', High:'#e08540', Medium:'#e8c547', Low:'#5abf7a' };
+  const critColor  = CRIT_COLOR[record.criticality] || '#8888aa';
+
+  // ── Status colour map ─────────────────────────────────────────────────
+  const STAT_COLOR = { Confirmed:'#4a90e2', Completed:'#5abf7a', Scheduled:'#9b72e8', Cancelled:'#e05555' };
+  const statColor  = STAT_COLOR[record.status] || '#8888aa';
+
+  const actionLabel = isUpdate ? '✏ Visit Updated' : '✦ New Visit Scheduled';
+  const actionColor = isUpdate ? '#e08540' : '#e8c547';
+
+  // ── Branded rounded-corner email template ─────────────────────────────
+  const bodyHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${subject}</title></head>
+<body style="margin:0;padding:0;background:#f0f0f8;font-family:'Segoe UI',Arial,sans-serif;">
+
+<!-- Outer wrapper -->
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f0f8;padding:32px 0;">
+<tr><td align="center">
+
+<!-- Card -->
+<table width="600" cellpadding="0" cellspacing="0" border="0"
+  style="max-width:600px;width:100%;background:#ffffff;border-radius:24px;
+         box-shadow:0 8px 40px rgba(0,0,0,0.10);overflow:hidden;">
+
+  <!-- Header band -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#0f0f1a 0%,#1e1e38 100%);
+               padding:36px 40px 28px;border-radius:24px 24px 0 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td>
+            <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;
+                        color:#e8c547;letter-spacing:-0.5px;line-height:1;">P</div>
+            <div style="font-size:11px;color:#8888aa;letter-spacing:1px;
+                        text-transform:uppercase;margin-top:2px;">PlantVisit · ${company}</div>
+          </td>
+          <td align="right">
+            <span style="display:inline-block;background:${actionColor}22;
+                         color:${actionColor};border:1px solid ${actionColor}55;
+                         border-radius:50px;padding:6px 16px;
+                         font-size:12px;font-weight:600;letter-spacing:0.3px;">
+              ${actionLabel}
+            </span>
+          </td>
+        </tr>
+      </table>
+      <div style="margin-top:24px;">
+        <div style="font-size:22px;font-weight:700;color:#f0f0f8;line-height:1.25;">
+          ${record.company}
+        </div>
+        <div style="font-size:14px;color:#aaaac8;margin-top:6px;">
+          ${record.plant} Plant &nbsp;·&nbsp; ${record.visitDate}
+        </div>
+      </div>
+    </td>
+  </tr>
+
+  <!-- Divider with badges -->
+  <tr>
+    <td style="background:#16162a;padding:14px 40px;">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="padding-right:10px;">
+            <span style="display:inline-block;background:${critColor}22;color:${critColor};
+                         border:1px solid ${critColor}55;border-radius:50px;
+                         padding:4px 14px;font-size:11px;font-weight:600;letter-spacing:0.3px;">
+              ⚡ ${record.criticality}
+            </span>
+          </td>
+          <td style="padding-right:10px;">
+            <span style="display:inline-block;background:${statColor}22;color:${statColor};
+                         border:1px solid ${statColor}55;border-radius:50px;
+                         padding:4px 14px;font-size:11px;font-weight:600;letter-spacing:0.3px;">
+              ● ${record.status}
+            </span>
+          </td>
+          <td>
+            <span style="display:inline-block;background:rgba(155,114,232,0.15);
+                         color:#9b72e8;border:1px solid rgba(155,114,232,0.3);
+                         border-radius:50px;padding:4px 14px;
+                         font-size:11px;font-weight:600;letter-spacing:0.3px;">
+              📋 ${record.category}
+            </span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Body -->
+  <td style="padding:32px 40px 0;">
+
+    <!-- Detail rows -->
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+      style="border-radius:16px;overflow:hidden;border:1px solid #e8e8f0;">
+      ${[
+        ['🏢','Company',     record.company],
+        ['🏭','Plant',       record.plant],
+        ['📅','Visit Date',  record.visitDate],
+        ['📬','Confirm Date',record.confirmDate || '—'],
+        ['👤','Rep / Guest', record.rep || '—'],
+        ['📋','Category',    record.category],
+        ['🔎','Focus Area',  record.focus || '—'],
+        ['👷','Coordinator', record.coordinator || '—'],
+        ['🏨','Hotel Stay',  record.stay === 'Y' ? `Yes — ${record.hotel || 'TBD'}` : 'No'],
+      ].map(([icon, label, value], i) => `
+      <tr style="background:${i%2===0?'#fafafe':'#f4f4fb'};">
+        <td style="padding:12px 18px;width:36px;font-size:16px;vertical-align:middle;">${icon}</td>
+        <td style="padding:12px 4px 12px 0;width:130px;font-size:12px;font-weight:600;
+                   color:#6b6b88;text-transform:uppercase;letter-spacing:0.4px;
+                   vertical-align:middle;">${label}</td>
+        <td style="padding:12px 18px 12px 8px;font-size:13px;color:#1a1a2e;
+                   font-weight:500;vertical-align:middle;">${value}</td>
+      </tr>`).join('')}
+    </table>
+
+    <!-- Agenda box -->
+    ${record.agenda ? `
+    <div style="margin-top:20px;background:#f4f3f0;border-radius:16px;
+                border-left:4px solid #e8c547;padding:18px 20px;">
+      <div style="font-size:11px;font-weight:700;color:#a8902a;text-transform:uppercase;
+                  letter-spacing:0.6px;margin-bottom:8px;">📝 Agenda</div>
+      <div style="font-size:13px;color:#3a3930;line-height:1.6;">${record.agenda}</div>
+    </div>` : ''}
+
+    <!-- Remarks box -->
+    ${record.remarks ? `
+    <div style="margin-top:14px;background:#fff8e8;border-radius:16px;
+                border-left:4px solid #e08540;padding:18px 20px;">
+      <div style="font-size:11px;font-weight:700;color:#b36020;text-transform:uppercase;
+                  letter-spacing:0.6px;margin-bottom:8px;">⚠ Remarks</div>
+      <div style="font-size:13px;color:#5a3a10;line-height:1.6;">${record.remarks}</div>
+    </div>` : ''}
+
+  </td>
+
+  <!-- CTA button -->
+  <tr>
+    <td style="padding:28px 40px 36px;">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="border-radius:50px;background:#e8c547;">
+            <a href="${directLink}"
+               style="display:inline-block;padding:14px 32px;font-size:14px;
+                      font-weight:700;color:#0f0f1a;text-decoration:none;
+                      letter-spacing:0.3px;border-radius:50px;">
+              View Visit Record →
+            </a>
+          </td>
+        </tr>
+      </table>
+      <div style="margin-top:14px;font-size:11px;color:#8888aa;">
+        Or copy this link:
+        <a href="${directLink}" style="color:#4a90e2;word-break:break-all;">${directLink}</a>
+      </div>
+    </td>
+  </tr>
+
+  <!-- Footer -->
+  <tr>
+    <td style="background:#0f0f1a;padding:20px 40px;border-radius:0 0 24px 24px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="font-size:11px;color:#8888aa;line-height:1.6;">
+            This notification was auto-generated by <strong style="color:#aaaac8;">PlantVisit · ${company}</strong><br>
+            via Microsoft Graph API. Please do not reply to this email.
+          </td>
+          <td align="right" style="font-size:11px;color:#8888aa;white-space:nowrap;vertical-align:top;">
+            ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table><!-- /card -->
+</td></tr></table><!-- /outer -->
+</body></html>`;
 
   // Attempt real send via Microsoft Graph API (fires-and-forgets)
   if (az.msClientId && az.msTenantId && az.msToEmail) {
