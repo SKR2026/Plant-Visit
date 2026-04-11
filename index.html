@@ -660,7 +660,8 @@ function initFirestoreListeners() {
 
   USERS_DOC.onSnapshot(doc => {
     if (doc.exists && doc.data().users) {
-      _usersData = doc.data().users;
+      // Merge: keep DEFAULT_USERS as fallback so built-in accounts always work
+      _usersData = { ...DEFAULT_USERS, ...doc.data().users };
     }
   }, e => console.error(e));
 
