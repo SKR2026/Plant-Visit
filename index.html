@@ -580,11 +580,11 @@ let _mailData   = [];
 let _usersData  = { ...DEFAULT_USERS };
 let _settingsData = {
   azure: {
-    connectionString: '',
+    tenantId: '',
+    applicationId: '',
+    clientSecret: '',
     senderEmail: 'noreply@company.com',
-    senderName: 'PlantVisit System',
-    endpoint: '',
-    apiKey: ''
+    senderName: 'PlantVisit System'
   },
   notification: {
     enableEmail: true,
@@ -1244,15 +1244,81 @@ function closeModal() {
 /* ══════════════════════════════════════════════════════════
    MAIL LOG — with direct links
 ══════════════════════════════════════════════════════════ */
+async function sendGraphEmail(toEmail, subject, bodyHtml) {
+  const az = _settingsData.azure || {};
+  if (!az.tenantId || !az.applicationId || !az.clientSecret || !az.senderEmail) return false;
+  try {
+    // Step 1: Acquire access token via client credentials flow
+    const tokenRes = await fetch(`https://login.microsoftonline.com/${az.tenantId}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: az.applicationId,
+        client_secret: az.clientSecret,
+        scope: 'https://graph.microsoft.com/.default'
+      })
+    });
+    if (!tokenRes.ok) return false;
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+    if (!accessToken) return false;
+
+    // Step 2: Send email via Microsoft Graph
+    const mailRes = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(az.senderEmail)}/sendMail`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: 'HTML', content: bodyHtml },
+          toRecipients: toEmail.split(',').map(e => ({ emailAddress: { address: e.trim() } })),
+          from: { emailAddress: { address: az.senderEmail, name: az.senderName || 'PlantVisit System' } }
+        },
+        saveToSentItems: false
+      })
+    });
+    return mailRes.status === 202;
+  } catch(e) {
+    console.error('Graph API email error:', e);
+    return false;
+  }
+}
+
 function logMail(record, isUpdate) {
   const logs = loadMail();
   const appUrl = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
   const directLink = `${appUrl}?visit=${record.id}`;
+  const subject = `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${record.visitDate}`;
+  const toAddr  = (_settingsData.notification?.managementEmail || 'management@company.com');
+  const bodyHtml = `<p><strong>${isUpdate ? 'Visit Updated' : 'New Visit Scheduled'}</strong></p>
+<table border="0" cellpadding="6" style="font-family:sans-serif;font-size:14px">
+  <tr><td><strong>Company</strong></td><td>${record.company}</td></tr>
+  <tr><td><strong>Plant</strong></td><td>${record.plant}</td></tr>
+  <tr><td><strong>Visit Date</strong></td><td>${record.visitDate}</td></tr>
+  <tr><td><strong>Category</strong></td><td>${record.category}</td></tr>
+  <tr><td><strong>Criticality</strong></td><td>${record.criticality}</td></tr>
+  <tr><td><strong>Coordinator</strong></td><td>${record.coordinator}</td></tr>
+  <tr><td><strong>Status</strong></td><td>${record.status}</td></tr>
+</table>
+<p><a href="${directLink}">View Visit Record →</a></p>`;
+
+  // Attempt real send via Microsoft Graph API (fires-and-forgets)
+  const az = _settingsData.azure || {};
+  if (az.tenantId && az.applicationId && az.clientSecret && az.senderEmail) {
+    sendGraphEmail(toAddr, subject, bodyHtml).then(ok => {
+      if (ok) toast('📧 Email Sent', `Notification sent via Microsoft Graph to ${toAddr}`);
+    });
+  }
+
   logs.unshift({
     id: 'm'+Date.now(),
     time: new Date().toLocaleString('en-IN'),
-    subject: `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${record.visitDate}`,
-    to: `plant-${record.plant.toLowerCase().replace(/\s/g,'')}@company.com, management@company.com`,
+    subject,
+    to: toAddr,
     body: `${record.category} | ${record.criticality} criticality | Coordinator: ${record.coordinator} | Status: ${record.status}`,
     plant: record.plant,
     visitId: record.id,
@@ -1268,11 +1334,11 @@ function renderMail(el) {
   el.innerHTML = `
   <div class="section-header">
     <div class="section-title">Mail Notification Log</div>
-    <div class="section-sub">Azure Communication Services · auto-sent on every create/update</div>
+    <div class="section-sub">Microsoft Graph API · auto-sent on every create/update</div>
   </div>
   <div class="alert alert-warn" style="margin-bottom:18px">
     ⚠ This is a demo — emails are <strong>simulated and logged locally</strong>.
-    In production, actual emails are sent via Azure Communication Services Cloud Functions.
+    In production, actual emails are sent via Microsoft Graph API using your Azure App Registration.
     Each notification includes a <strong>direct-access link</strong> so plant users can open records instantly.
   </div>
   <div class="card">
@@ -1315,7 +1381,7 @@ function renderSettings(el) {
     <div class="section-sub">Configure system, Azure, and user management</div>
   </div>
   <div class="settings-tabs">
-    <button class="settings-tab${_settingsActiveTab==='azure'?' active':''}" onclick="switchSettingsTab('azure')">☁ Azure Communication</button>
+    <button class="settings-tab${_settingsActiveTab==='azure'?' active':''}" onclick="switchSettingsTab('azure')">🔗 Microsoft Graph API</button>
     <button class="settings-tab${_settingsActiveTab==='notifications'?' active':''}" onclick="switchSettingsTab('notifications')">🔔 Notifications</button>
     <button class="settings-tab${_settingsActiveTab==='plants'?' active':''}" onclick="switchSettingsTab('plants')">🏭 Plants</button>
     <button class="settings-tab${_settingsActiveTab==='users'?' active':''}" onclick="switchSettingsTab('users')">👥 User Management</button>
@@ -1344,36 +1410,35 @@ function renderAzureSettings(el) {
   const az = _settingsData.azure || {};
   el.innerHTML = `
   <div class="card">
-    <div class="card-header"><div class="card-title">Azure Communication Services</div><span class="badge badge-medium">Email Channel</span></div>
+    <div class="card-header"><div class="card-title">Microsoft Graph API</div><span class="badge badge-medium">Email Channel</span></div>
     <div class="alert alert-info" style="margin-bottom:20px">
-      ℹ Configure your Azure Communication Services endpoint to enable real email notifications on visit creation and updates.
+      🔗 Configure Microsoft Graph API via Azure App Registration to enable email notifications. Find these values in <strong>Azure Portal → App Registrations → Your App</strong>.
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Connection</div>
+      <div class="settings-section-title">Azure AD — App Registration</div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Connection String</div><div class="settings-row-sub">Azure Communication Services connection string from Azure Portal</div></div>
+        <div><div class="settings-row-label">Directory (Tenant) ID</div><div class="settings-row-sub">Azure Portal → App Registrations → Your App → Overview</div></div>
         <div class="settings-row-right">
-          <input type="password" class="settings-input mono" id="az_conn" placeholder="endpoint=https://…;accesskey=…" value="${xe(az.connectionString||'')}">
-          <span class="settings-saved" id="az_conn_saved">✓ Saved</span>
+          <input type="text" class="settings-input mono" id="az_tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.tenantId||'')}">
         </div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Endpoint URL</div><div class="settings-row-sub">Your Azure Communication Services resource endpoint</div></div>
+        <div><div class="settings-row-label">Application (Client) ID</div><div class="settings-row-sub">Azure Portal → App Registrations → Your App → Overview</div></div>
         <div class="settings-row-right">
-          <input type="text" class="settings-input mono" id="az_endpoint" placeholder="https://your-resource.communication.azure.com" value="${xe(az.endpoint||'')}">
+          <input type="text" class="settings-input mono" id="az_app_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.applicationId||'')}">
         </div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Access Key</div><div class="settings-row-sub">Primary or secondary access key</div></div>
+        <div><div class="settings-row-label">Client Secret</div><div class="settings-row-sub">Azure Portal → App Registrations → Certificates &amp; secrets → Client secrets → Value</div></div>
         <div class="settings-row-right">
-          <input type="password" class="settings-input mono" id="az_key" placeholder="Your access key" value="${xe(az.apiKey||'')}">
+          <input type="password" class="settings-input mono" id="az_client_secret" placeholder="Client secret value" value="${xe(az.clientSecret||'')}">
         </div>
       </div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Sender Identity</div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Sender Email</div><div class="settings-row-sub">Verified sender email address (must be registered in Azure)</div></div>
+        <div><div class="settings-row-label">Sender Email</div><div class="settings-row-sub">Microsoft 365 mailbox address used to send notifications (must have Mail.Send permission)</div></div>
         <div class="settings-row-right"><input type="email" class="settings-input" id="az_sender_email" placeholder="noreply@yourdomain.com" value="${xe(az.senderEmail||'')}"></div>
       </div>
       <div class="settings-row">
@@ -1381,57 +1446,34 @@ function renderAzureSettings(el) {
         <div class="settings-row-right"><input type="text" class="settings-input" id="az_sender_name" placeholder="PlantVisit System" value="${xe(az.senderName||'')}"></div>
       </div>
     </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Azure AD — App Registration</div>
-      <div class="alert alert-info" style="margin-bottom:14px;font-size:12px">
-        🔐 Required for Azure Active Directory authentication. Find these values in <strong>Azure Portal → App Registrations → Your App → Overview</strong>.
-      </div>
-      <div class="settings-row">
-        <div><div class="settings-row-label">Application (Client) ID</div><div class="settings-row-sub">Unique identifier for this app registration in Azure AD</div></div>
-        <div class="settings-row-right">
-          <input type="text" class="settings-input mono" id="az_app_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.applicationId||'')}">
-        </div>
-      </div>
-      <div class="settings-row">
-        <div><div class="settings-row-label">Directory (Tenant) ID</div><div class="settings-row-sub">Azure AD tenant identifier for your organisation</div></div>
-        <div class="settings-row-right">
-          <input type="text" class="settings-input mono" id="az_tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${xe(az.tenantId||'')}">
-        </div>
-      </div>
-      <div class="settings-row">
-        <div><div class="settings-row-label">Client Secret</div><div class="settings-row-sub">App registration client secret value (keep secure)</div></div>
-        <div class="settings-row-right">
-          <input type="password" class="settings-input mono" id="az_client_secret" placeholder="Client secret value" value="${xe(az.clientSecret||'')}">
-        </div>
-      </div>
-    </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-      <button class="btn btn-ghost" onclick="testAzureConnection()">Test Connection</button>
-      <button class="btn btn-gold" onclick="saveAzureSettings()">✓ Save Azure Config</button>
+      <button class="btn btn-ghost" onclick="testAzureConnection()">⚡ Test Connection</button>
+      <button class="btn btn-gold" onclick="saveAzureSettings()">✓ Save Graph API Config</button>
     </div>
   </div>`;
 }
-
 function saveAzureSettings() {
   _settingsData.azure = {
-    connectionString: document.getElementById('az_conn').value.trim(),
-    endpoint:         document.getElementById('az_endpoint').value.trim(),
-    apiKey:           document.getElementById('az_key').value.trim(),
-    senderEmail:      document.getElementById('az_sender_email').value.trim(),
-    senderName:       document.getElementById('az_sender_name').value.trim(),
-    applicationId:    document.getElementById('az_app_id').value.trim(),
-    tenantId:         document.getElementById('az_tenant_id').value.trim(),
-    clientSecret:     document.getElementById('az_client_secret').value.trim(),
+    tenantId:      document.getElementById('az_tenant_id').value.trim(),
+    applicationId: document.getElementById('az_app_id').value.trim(),
+    clientSecret:  document.getElementById('az_client_secret').value.trim(),
+    senderEmail:   document.getElementById('az_sender_email').value.trim(),
+    senderName:    document.getElementById('az_sender_name').value.trim(),
   };
   saveSettings();
-  toast('✓ Azure Config Saved', 'Azure Communication Services & AD configuration updated.');
+  toast('✓ Graph API Config Saved', 'Microsoft Graph API configuration updated successfully.');
 }
 
 function testAzureConnection() {
-  const conn = document.getElementById('az_conn').value.trim();
-  if (!conn) { toast('Config Missing','Please enter a connection string first.',true); return; }
-  toast('Testing…','Checking Azure Communication Services connection…');
-  setTimeout(() => toast('⚠ Demo Mode','Real connection test requires server-side execution (Cloud Function).'), 1800);
+  const tenantId     = document.getElementById('az_tenant_id').value.trim();
+  const appId        = document.getElementById('az_app_id').value.trim();
+  const clientSecret = document.getElementById('az_client_secret').value.trim();
+  if (!tenantId || !appId || !clientSecret) {
+    toast('Config Missing', 'Please enter Tenant ID, Application ID and Client Secret first.', true);
+    return;
+  }
+  toast('Testing…', 'Validating Microsoft Graph API credentials…');
+  setTimeout(() => toast('⚠ Demo Mode', 'Live token validation requires a server-side proxy. Save your config and test via your backend.'), 1800);
 }
 
 function renderNotificationSettings(el) {
