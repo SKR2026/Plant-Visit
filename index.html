@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlantVisit — Customer Visit Management</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a1a2e'/><text y='23' x='5' font-size='20' fill='%23e8c547' font-family='Georgia'>P</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Firebase SDKs (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics-compat.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   DESIGN DIRECTION: Industrial-Refined / Command Center
+   Dark navy base, warm gold accents, crisp data typography
+   Feels like a serious enterprise ops tool with personality
+═══════════════════════════════════════════════════════════ */
+
+:root {
+  --navy:    #0f0f1a;
+  --navy2:   #16162a;
+  --navy3:   #1e1e38;
+  --navy4:   #262644;
+  --navy5:   #2e2e52;
+  --gold:    #e8c547;
+  --gold2:   #f0d060;
+  --gold-dim:#a8902a;
+  --gold-bg: rgba(232,197,71,0.10);
+  --gold-bdr:rgba(232,197,71,0.22);
+  --slate:   #8888aa;
+  --slate2:  #aaaac8;
+  --white:   #f0f0f8;
+  --white2:  #c8c8e0;
+  --red:     #e05555;
+  --red-bg:  rgba(224,85,85,0.12);
+  --orange:  #e08540;
+  --orange-bg:rgba(224,133,64,0.12);
+  --blue:    #4a90e2;
+  --blue-bg: rgba(74,144,226,0.12);
+  --green:   #5abf7a;
+  --green-bg:rgba(90,191,122,0.12);
+  --border:  rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --radius:  8px;
+  --radius-lg:14px;
+  --shadow:  0 4px 24px rgba(0,0,0,0.4);
+  --font-display:'DM Serif Display', Georgia, serif;
+  --font:'DM Sans', 'Segoe UI', sans-serif;
+
+  /* Light mode overrides (applied via .light class on body) */
+}
+
+body.light {
+  --navy:    #f4f3f0;
+  --navy2:   #ebe9e4;
+  --navy3:   #e0ddd6;
+  --navy4:   #d4d0c8;
+  --navy5:   #c8c3b8;
+  --gold:    #b8860b;
+  --gold2:   #d4a017;
+  --gold-dim:#8a6408;
+  --gold-bg: rgba(184,134,11,0.08);
+  --gold-bdr:rgba(184,134,11,0.20);
+  --slate:   #6b6a60;
+  --slate2:  #4a4940;
+  --white:   #1a1918;
+  --white2:  #3a3930;
+  --border:  rgba(0,0,0,0.08);
+  --border2: rgba(0,0,0,0.14);
+  --red:     #c0392b;
+  --red-bg:  rgba(192,57,43,0.09);
+  --orange:  #d35400;
+  --orange-bg:rgba(211,84,0,0.09);
+  --blue:    #2471a3;
+  --blue-bg: rgba(36,113,163,0.09);
+  --green:   #1e8449;
+  --green-bg:rgba(30,132,73,0.09);
+  --shadow:  0 4px 20px rgba(0,0,0,0.10);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--navy);
+  color: var(--white);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 100vh;
+  transition: background .3s, color .3s;
+}
+
+/* ─── SCROLLBAR ──────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--navy2); }
+::-webkit-scrollbar-thumb { background: var(--navy5); border-radius: 3px; }
+
+/* ─── HEADER ─────────────────────────────────────────────── */
+.header {
+  background: var(--navy2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 60px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  text-decoration: none;
+}
+.logo-mark {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--gold);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.logo-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+.logo-sub {
+  font-size: 11px;
+  color: var(--slate);
+  font-weight: 300;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+
+.header-spacer { flex: 1; }
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.user-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--navy4);
+  border: 1.5px solid var(--gold-bdr);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold);
+  font-family: var(--font-display);
+}
+.user-name-block { line-height: 1.2; }
+.user-name { font-size: 13px; font-weight: 500; color: var(--white); }
+.user-role { font-size: 10px; color: var(--slate); letter-spacing: .3px; text-transform: uppercase; }
+
+.role-select {
+  background: var(--navy3);
+  border: 1px solid var(--border2);
+  color: var(--white2);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  cursor: pointer;
+}
+.role-select:focus { outline: none; border-color: var(--gold-bdr); }
+
+.theme-toggle {
+  width: 36px; height: 36px;
+  border-radius: var(--radius);
+  background: var(--navy3);
+  border: 1px solid var(--border);
+  color: var(--slate2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all .2s;
+}
+.theme-toggle:hover { border-color: var(--gold-bdr); color: var(--gold); }
+
+/* ─── NAV ────────────────────────────────────────────────── */
+.nav {
+  background: var(--navy2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  padding: 0 24px;
+  gap: 0;
+  overflow-x: auto;
+}
+.nav-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--slate);
+  padding: 13px 18px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font);
+  font-weight: 400;
+  white-space: nowrap;
+  transition: all .15s;
+  letter-spacing: .2px;
+}
+.nav-btn:hover { color: var(--white2); }
+.nav-btn.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+  font-weight: 500;
+}
+.nav-badge {
+  display: inline-block;
+  background: var(--gold-bg);
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 20px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* ─── CONTENT ────────────────────────────────────────────── */
+.content { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+/* ─── SECTION TITLE ──────────────────────────────────────── */
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--white);
+  letter-spacing: -0.3px;
+}
+.section-sub {
+  font-size: 12px;
+  color: var(--slate);
+}
+
+/* ─── METRIC CARDS ───────────────────────────────────────── */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.metric {
+  background: var(--navy2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color .2s;
+}
+.metric::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--metric-accent, var(--gold));
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.metric:hover { border-color: var(--border2); }
+.metric-icon {
+  font-size: 18px;
+  margin-bottom: 8px;
+  opacity: .7;
+}
+.metric-label {
+  font-size: 10px;
+  color: var(--slate);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.metric-value {
+  font-family: var(--font-display);
+  font-size: 32px;
+  color: var(--white);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.metric-sub {
+  font-size: 11px;
+  color: var(--slate);
+}
+
+/* ─── CHART GRID ─────────────────────────────────────────── */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.chart-grid.three {
+  grid-template-columns: repeat(3, minmax(0,1fr));
+}
+.chart-card {
+  background: var(--navy2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+.chart-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--slate);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  margin-bottom: 14px;
+}
+
+/* ─── LEGEND ─────────────────────────────────────────────── */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--slate2);
+}
+.legend-dot {
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ─── TABLE ──────────────────────────────────────────────── */
+.table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+}
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead { position: sticky; top: 0; z-index: 5; }
+th {
+  background: var(--navy3);
+  color: var(--slate);
+  font-weight: 600;
+  padding: 10px 14px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border2);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--white2);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+tbody tr { transition: background .12s; }
+tbody tr:hover td { background: var(--navy3); }
+.td-company { color: var(--white); font-weight: 500; font-size: 13px; }
+.td-sub { font-size: 10px; color: var(--slate); margin-top: 1px; }
+
+/* ─── BADGES ─────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+.badge-critical { background: var(--red-bg);    color: var(--red);    border: 1px solid rgba(224,85,85,.25); }
+.badge-high     { background: var(--orange-bg); color: var(--orange); border: 1px solid rgba(224,133,64,.25); }
+.badge-medium   { background: var(--blue-bg);   color: var(--blue);   border: 1px solid rgba(74,144,226,.25); }
+.badge-low      { background: var(--green-bg);  color: var(--green);  border: 1px solid rgba(90,191,122,.25); }
+.badge-gold     { background: var(--gold-bg);   color: var(--gold);   border: 1px solid var(--gold-bdr); }
+.badge-status-s { background: var(--blue-bg);   color: var(--blue);   border: 1px solid rgba(74,144,226,.25); }
+.badge-status-c { background: var(--gold-bg);   color: var(--gold);   border: 1px solid var(--gold-bdr); }
+.badge-status-d { background: var(--green-bg);  color: var(--green);  border: 1px solid rgba(90,191,122,.25); }
+.badge-status-x { background: var(--red-bg);    color: var(--red);    border: 1px solid rgba(224,85,85,.25); }
+
+/* ─── FILTERS ────────────────────────────────────────────── */
+.filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.search-box {
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+  position: relative;
+}
+.search-box input {
+  width: 100%;
+  padding: 8px 12px 8px 34px;
+  background: var(--navy3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--white);
+  font-family: var(--font);
+  font-size: 13px;
+}
+.search-box::before {
+  content: '⌕';
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--slate);
+  font-size: 15px;
+  pointer-events: none;
+}
+.search-box input:focus { outline: none; border-color: var(--gold-bdr); }
+
+select.filter-sel {
+  background: var(--navy3);
+  border: 1px solid var(--border);
+  color: var(--white2);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  cursor: pointer;
+}
+select.filter-sel:focus { outline: none; border-color: var(--gold-bdr); }
+
+/* ─── FORM ───────────────────────────────────────────────── */
+.form-panel {
+  background: var(--navy2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 26px;
+  margin-bottom: 20px;
+}
+.form-panel-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--white);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.form-panel-title span {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--gold);
+  font-weight: 500;
+  background: var(--gold-bg);
+  padding: 2px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--gold-bdr);
+}
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-grid.g3 { grid-template-columns: 1fr 1fr 1fr; }
+.form-grid.g4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.form-divider {
+  grid-column: 1/-1;
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.form-section-label {
+  grid-column: 1/-1;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gold-dim);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin-top: 4px;
+}
+.fg { display: flex; flex-direction: column; gap: 6px; }
+.fg.full { grid-column: 1/-1; }
+.fg label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--slate2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.req { color: var(--gold); margin-left: 2px; }
+.fg input, .fg select, .fg textarea {
+  background: var(--navy3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--white);
+  font-family: var(--font);
+  width: 100%;
+  transition: border-color .15s;
+}
+.fg input:focus, .fg select:focus, .fg textarea:focus {
+  outline: none;
+  border-color: var(--gold-bdr);
+  background: var(--navy4);
+}
+.fg input::placeholder { color: var(--slate); }
+.fg textarea { resize: vertical; min-height: 80px; }
+.fg select option { background: var(--navy3); }
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  grid-column: 1/-1;
+}
+
+/* ─── BUTTONS ────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 20px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-family: var(--font);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: all .15s;
+  text-decoration: none;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-gold {
+  background: var(--gold);
+  color: #0f0f1a;
+  border-color: var(--gold);
+  font-weight: 600;
+}
+.btn-gold:hover:not(:disabled) { background: var(--gold2); }
+.btn-ghost {
+  background: none;
+  color: var(--white2);
+  border-color: var(--border2);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--navy3); border-color: var(--border2); }
+.btn-danger {
+  background: none;
+  color: var(--red);
+  border-color: rgba(224,85,85,.25);
+}
+.btn-danger:hover:not(:disabled) { background: var(--red-bg); }
+.btn-sm { padding: 5px 12px; font-size: 11px; }
+
+/* ─── CARDS ──────────────────────────────────────────────── */
+.card {
+  background: var(--navy2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--white);
+  letter-spacing: .1px;
+}
+
+/* ─── ALERT ──────────────────────────────────────────────── */
+.alert {
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 12px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.alert-info { background: var(--blue-bg); color: var(--blue); border: 1px solid rgba(74,144,226,.2); }
+.alert-warn { background: var(--orange-bg); color: var(--orange); border: 1px solid rgba(224,133,64,.2); }
+
+/* ─── MODAL ──────────────────────────────────────────────── */
+.overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.65);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  backdrop-filter: blur(2px);
+}
+.overlay.open { display: flex; }
+.modal {
+  background: var(--navy2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  width: min(820px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+  animation: slideUp .2s ease;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+.modal-title { font-family: var(--font-display); font-size: 20px; color: var(--white); }
+.modal-close {
+  width: 30px; height: 30px;
+  border-radius: var(--radius);
+  background: var(--navy3);
+  border: 1px solid var(--border);
+  color: var(--slate);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  transition: all .15s;
+}
+.modal-close:hover { color: var(--white); background: var(--navy4); }
+
+/* ─── VIEW MODAL ─────────────────────────────────────────── */
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.detail-item { }
+.detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--slate);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 3px;
+}
+.detail-value { font-size: 13px; color: var(--white2); }
+.detail-value.em { color: var(--white); font-weight: 500; }
+.detail-full { grid-column: 1/-1; }
+
+/* ─── TOAST ──────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 24px; right: 24px;
+  background: var(--navy3);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  font-size: 13px;
+  color: var(--white);
+  z-index: 500;
+  display: none;
+  min-width: 240px;
+  box-shadow: var(--shadow);
+  animation: toastIn .25s ease;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.toast.show { display: block; }
+.toast-title { font-weight: 600; margin-bottom: 2px; }
+.toast-sub { font-size: 11px; color: var(--slate); }
+.toast-bar {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 2px;
+  background: var(--gold);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  animation: shrink 3.4s linear forwards;
+}
+@keyframes shrink { from { width: 100%; } to { width: 0%; } }
+
+/* ─── MAIL LOG ───────────────────────────────────────────── */
+.mail-item {
+  display: flex;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+}
+.mail-item:last-child { border-bottom: none; }
+.mail-dot {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--navy4);
+  border: 1.5px solid var(--gold-bdr);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  color: var(--gold);
+}
+.mail-body { flex: 1; min-width: 0; }
+.mail-subject { font-size: 13px; font-weight: 500; color: var(--white); margin-bottom: 3px; }
+.mail-meta { font-size: 11px; color: var(--slate); }
+.mail-sent { font-size: 11px; color: var(--green); margin-top: 3px; }
+
+/* ─── LOADING / EMPTY ────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--slate);
+}
+.empty-icon { font-size: 36px; margin-bottom: 10px; opacity: .4; }
+.empty-text { font-size: 13px; }
+
+/* ─── PAGE LOADER ────────────────────────────────────────── */
+#pageLoader {
+  position: fixed; inset: 0;
+  background: var(--navy);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  flex-direction: column;
+  gap: 16px;
+  transition: opacity .4s ease;
+}
+#pageLoader.hidden { opacity: 0; pointer-events: none; }
+.loader-logo { font-family: var(--font-display); font-size: 36px; color: var(--gold); letter-spacing: -1px; }
+.loader-sub { font-size: 12px; color: var(--slate); letter-spacing: .4px; }
+.loader-bar {
+  width: 120px; height: 2px;
+  background: var(--navy4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.loader-fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 2px;
+  animation: pulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes pulse { from { width: 20%; } to { width: 100%; } }
+
+/* ─── RESPONSIVE ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .metric-grid { grid-template-columns: 1fr 1fr; }
+  .chart-grid, .chart-grid.three { grid-template-columns: 1fr; }
+  .detail-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .metric-grid { grid-template-columns: 1fr 1fr; }
+  .form-grid, .form-grid.g3, .form-grid.g4 { grid-template-columns: 1fr; }
+  .content { padding: 16px; }
+  .header { padding: 0 16px; gap: 8px; }
+  .logo-sub, .user-name-block { display: none; }
+  .detail-grid { grid-template-columns: 1fr; }
+  .chart-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── PRINT ──────────────────────────────────────────────── */
+@media print {
+  .header, .nav, .filters, .btn, .form-panel { display: none !important; }
+  body { background: white !important; color: black !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- PAGE LOADER -->
+<div id="pageLoader">
+  <div class="loader-logo">PlantVisit</div>
+  <div class="loader-bar"><div class="loader-fill"></div></div>
+  <div class="loader-sub" id="loaderStatus">Connecting to Firebase…</div>
+</div>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="logo">
+    <span class="logo-mark">PlantVisit</span>
+    <div class="logo-dot"></div>
+    <span class="logo-sub">Visit Management</span>
+  </div>
+  <div class="header-spacer"></div>
+  <select class="role-select" id="userSel" onchange="switchUser(this.value)" title="Switch demo user">
+    <option value="admin">Admin — All Plants</option>
+    <option value="mgmt">VP Operations — All Plants</option>
+    <option value="pune">Plant User — Pune</option>
+    <option value="chennai">Plant User — Chennai</option>
+    <option value="ahmedabad">Plant User — Ahmedabad</option>
+  </select>
+  <div class="user-info">
+    <div class="user-avatar" id="userAvatar">A</div>
+    <div class="user-name-block">
+      <div class="user-name" id="userName">Admin User</div>
+      <div class="user-role" id="userRole">Administrator</div>
+    </div>
+  </div>
+  <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+
+<!-- NAV -->
+<nav class="nav">
+  <button class="nav-btn active" id="tab-dashboard" onclick="showTab('dashboard')">Dashboard</button>
+  <button class="nav-btn" id="tab-records" onclick="showTab('records')">
+    Visit Records <span class="nav-badge" id="recordsBadge">0</span>
+  </button>
+  <button class="nav-btn" id="tab-new" onclick="showTab('new')">+ New Visit</button>
+  <button class="nav-btn" id="tab-mail" onclick="showTab('mail')">
+    Mail Log <span class="nav-badge" id="mailBadge">0</span>
+  </button>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="content" id="mainContent"></main>
+
+<!-- MODAL (view / edit) -->
+<div class="overlay" id="overlay">
+  <div class="modal" id="modalBox">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Visit Details</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <div class="toast-title" id="toastTitle"></div>
+  <div class="toast-sub" id="toastSub"></div>
+  <div class="toast-bar"></div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   FIREBASE INITIALIZATION
+══════════════════════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey:            "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
+  authDomain:        "skr-task.firebaseapp.com",
+  projectId:         "skr-task",
+  storageBucket:     "skr-task.firebasestorage.app",
+  messagingSenderId: "1011690659933",
+  appId:             "1:1011690659933:web:f57e43ee0267a475682db4",
+  measurementId:     "G-67NGHMK0QR"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db      = firebase.firestore();
+const analytics = firebase.analytics();
+
+const VISITS_COL = 'visits';
+const MAIL_DOC   = db.collection('config').doc('mailLogs');
+
+/* ══════════════════════════════════════════════════════════
+   DATA & STATE
+══════════════════════════════════════════════════════════ */
+const STORAGE_KEY = 'plantvisit_v2';  // kept for theme only
+const MAIL_KEY    = 'plantvisit_mail_v2';
+
+const USERS = {
+  admin:     { name: 'Admin User',    initials: 'AU', role: 'Administrator',   access: 'admin',      plant: null },
+  mgmt:      { name: 'VP Operations', initials: 'VO', role: 'Top Management',  access: 'management', plant: null },
+  pune:      { name: 'Rajesh Kumar',  initials: 'RK', role: 'Plant User',       access: 'plant',      plant: 'Pune' },
+  chennai:   { name: 'Anita Sharma',  initials: 'AS', role: 'Plant User',       access: 'plant',      plant: 'Chennai' },
+  ahmedabad: { name: 'Pradeep Mehta', initials: 'PM', role: 'Plant User',       access: 'plant',      plant: 'Ahmedabad' },
+};
+
+const PLANTS     = ['Pune','Chennai','Ahmedabad'];
+const CATEGORIES = ['Business Development','Technical Review','Customer Complaint','Partnership','Training','Compliance','After Sales','Audit'];
+const CRITS      = ['Critical','High','Medium','Low'];
+const STATUSES   = ['Scheduled','Confirmed','Completed','Cancelled'];
+
+const SEED_DATA = [
+  { id:'v1', confirmDate:'2024-03-10', visitDate:'2024-03-18', plant:'Pune',      company:'Tata Steel Ltd',        rep:'Mr. Suresh Patel',      category:'Business Development', criticality:'High',     focus:'New Order',          agenda:'Discuss Q2 supply chain requirements and annual pricing structure',  coordinator:'Rajesh Kumar',  attendees:'Rajesh Kumar, Vivek Singh, CFO',          stay:'Y', hotel:'Marriott Pune',       remarks:'VIP client — ensure boardroom availability', status:'Confirmed',  createdAt:'2024-03-10T10:00:00' },
+  { id:'v2', confirmDate:'2024-03-12', visitDate:'2024-03-22', plant:'Chennai',   company:'L&T Constructions',     rep:'Ms. Priya Nair',         category:'Technical Review',     criticality:'Medium',   focus:'Quality Audit',      agenda:'Annual quality assessment and process walkthrough at plant floor',   coordinator:'Anita Sharma',  attendees:'Anita Sharma, Quality Head, Plant Manager', stay:'N', hotel:'',                    remarks:'Bring updated QC reports', status:'Confirmed',  createdAt:'2024-03-12T09:00:00' },
+  { id:'v3', confirmDate:'2024-03-14', visitDate:'2024-03-16', plant:'Ahmedabad', company:'Reliance Industries',   rep:'Mr. Amit Shah',          category:'Customer Complaint',   criticality:'Critical', focus:'Issue Resolution',    agenda:'Address batch rejection complaint — Lot #R4456, financial impact Rs. 12L', coordinator:'Pradeep Mehta', attendees:'Pradeep Mehta, QA Head, Production Head',   stay:'Y', hotel:'Hyatt Ahmedabad',     remarks:'Priority resolution required', status:'Completed', createdAt:'2024-03-14T11:00:00' },
+  { id:'v4', confirmDate:'2024-03-15', visitDate:'2024-03-25', plant:'Pune',      company:'Mahindra & Mahindra',   rep:'Mr. Ravi Gupta',         category:'Partnership',          criticality:'High',     focus:'Strategic Alliance',  agenda:'Explore long-term supplier partnership for EV components — 5yr roadmap', coordinator:'Rajesh Kumar',  attendees:'Rajesh Kumar, CEO, Sales Head, Legal',       stay:'Y', hotel:'Taj Blue Diamond',    remarks:'Board-level meeting — prepare full company profile', status:'Scheduled', createdAt:'2024-03-15T08:00:00' },
+  { id:'v5', confirmDate:'2024-03-16', visitDate:'2024-04-02', plant:'Chennai',   company:'SKF Bearings India',    rep:'Ms. Deepa Joshi',        category:'Training',             criticality:'Low',      focus:'Product Demo',        agenda:'New bearing technology demonstration for plant engineers and team',  coordinator:'Anita Sharma',  attendees:'Engineering team (8 members)',              stay:'N', hotel:'',                    remarks:'Arrange projector and training room', status:'Scheduled', createdAt:'2024-03-16T14:00:00' },
+  { id:'v6', confirmDate:'2024-03-17', visitDate:'2024-03-20', plant:'Ahmedabad', company:'Bureau Veritas',        rep:"Mr. John D'Souza",       category:'Compliance',           criticality:'Critical', focus:'ISO Audit',           agenda:'Annual ISO 9001:2015 surveillance audit — all documentation required', coordinator:'Pradeep Mehta', attendees:'All department heads, Quality team',         stay:'N', hotel:'',                    remarks:'Ensure all documentation is current', status:'Completed', createdAt:'2024-03-17T07:00:00' },
+  { id:'v7', confirmDate:'2024-03-18', visitDate:'2024-04-10', plant:'Pune',      company:'Bajaj Auto Ltd',        rep:'Mr. Kedar Trivedi',      category:'After Sales',          criticality:'Medium',   focus:'Warranty Review',     agenda:'Q4 warranty claim review and next quarter supply forecast discussion',  coordinator:'Rajesh Kumar',  attendees:'Sales team, Service head',                  stay:'N', hotel:'',                    remarks:'Carry warranty data reports', status:'Scheduled', createdAt:'2024-03-18T10:00:00' },
+];
+
+let currentUser = USERS.admin;
+let darkMode    = false;
+let chartReg    = {};
+
+// ── In-memory caches synced from Firestore ──────────────────
+let _visitsData = [];
+let _mailData   = [];
+let _appReady   = false;
+
+/* ══════════════════════════════════════════════════════════
+   FIRESTORE DATA LAYER
+══════════════════════════════════════════════════════════ */
+
+/** Return cached visits (synchronous — cache is kept fresh by onSnapshot) */
+function loadVisits() { return [..._visitsData]; }
+
+/** Persist full visits array to Firestore (batch upsert + delete orphans) */
+function saveVisits(visits) {
+  _visitsData = visits; // update cache immediately so UI stays snappy
+  const newIds   = new Set(visits.map(v => v.id));
+  const oldIds   = new Set(_visitsData.map(v => v.id)); // stale, but fine for immediate diff
+  const batch    = db.batch();
+  // Upsert all
+  visits.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
+  // Delete visits missing from new array (deletions)
+  _visitsData.filter(v => !newIds.has(v.id)).forEach(v =>
+    batch.delete(db.collection(VISITS_COL).doc(v.id))
+  );
+  batch.commit().catch(err => console.error('saveVisits error:', err));
+}
+
+/** Persist a single visit document (create or update) */
+function saveOneVisit(v) {
+  _visitsData = _visitsData.filter(x => x.id !== v.id).concat(v);
+  db.collection(VISITS_COL).doc(v.id).set(v)
+    .catch(err => console.error('saveOneVisit error:', err));
+}
+
+/** Delete a single visit document */
+function deleteOneVisit(id) {
+  _visitsData = _visitsData.filter(v => v.id !== id);
+  db.collection(VISITS_COL).doc(id).delete()
+    .catch(err => console.error('deleteOneVisit error:', err));
+}
+
+/** Return cached mail logs */
+function loadMail() { return [..._mailData]; }
+
+/** Persist mail logs array to Firestore (stored as a single config doc) */
+function saveMail(mails) {
+  _mailData = mails;
+  MAIL_DOC.set({ logs: mails })
+    .catch(err => console.error('saveMail error:', err));
+}
+
+/* ══════════════════════════════════════════════════════════
+   FIRESTORE REAL-TIME LISTENERS
+══════════════════════════════════════════════════════════ */
+function initFirestoreListeners() {
+  // ── Visits (real-time) ──────────────────────────────────
+  db.collection(VISITS_COL)
+    .orderBy('createdAt', 'asc')
+    .onSnapshot(snapshot => {
+      _visitsData = snapshot.docs.map(d => d.data());
+
+      if (!_appReady) {
+        // First load: seed if collection is empty
+        if (_visitsData.length === 0) {
+          document.getElementById('loaderStatus').textContent = 'Seeding sample data…';
+          const batch = db.batch();
+          SEED_DATA.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
+          batch.commit().then(() => {
+            _visitsData = [...SEED_DATA];
+            bootApp();
+          }).catch(err => {
+            console.error('Seed error:', err);
+            _visitsData = [...SEED_DATA]; // fallback to local seed
+            bootApp();
+          });
+        } else {
+          bootApp();
+        }
+      } else {
+        // Subsequent updates: refresh current view
+        updateBadges();
+        const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
+        showTab(activeTab);
+      }
+    }, err => {
+      console.error('Firestore onSnapshot error:', err);
+      // Fallback: boot with empty data
+      if (!_appReady) bootApp();
+    });
+
+  // ── Mail logs (real-time) ───────────────────────────────
+  MAIL_DOC.onSnapshot(doc => {
+    _mailData = doc.exists ? (doc.data().logs || []) : [];
+    if (_appReady) updateBadges();
+  }, err => console.error('Mail onSnapshot error:', err));
+}
+
+function bootApp() {
+  _appReady = true;
+  // Restore theme
+  if (localStorage.getItem('pv_theme') === 'light') {
+    darkMode = true;
+    document.body.classList.add('light');
+    document.getElementById('themeBtn').textContent = '☀️';
+  }
+  updateBadges();
+  showTab('dashboard');
+  // Hide loader with short delay for smooth UX
+  setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
+}
+
+function getVisible() {
+  const visits = loadVisits();
+  if (currentUser.access !== 'plant') return visits;
+  return visits.filter(v => v.plant === currentUser.plant);
+}
+
+/* ══════════════════════════════════════════════════════════
+   USER / THEME
+══════════════════════════════════════════════════════════ */
+function switchUser(id) {
+  currentUser = USERS[id];
+  document.getElementById('userAvatar').textContent = currentUser.initials;
+  document.getElementById('userName').textContent   = currentUser.name;
+  document.getElementById('userRole').textContent   = currentUser.role;
+
+  const mailTab = document.getElementById('tab-mail');
+  mailTab.style.display = currentUser.access === 'plant' ? 'none' : '';
+
+  updateBadges();
+  const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
+  showTab(activeTab);
+}
+
+function toggleTheme() {
+  darkMode = !darkMode;
+  document.body.classList.toggle('light', darkMode);
+  document.getElementById('themeBtn').textContent = darkMode ? '☀️' : '🌙';
+  localStorage.setItem('pv_theme', darkMode ? 'light' : 'dark');
+  destroyCharts();
+  const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
+  showTab(activeTab);
+}
+
+function destroyCharts() {
+  Object.values(chartReg).forEach(c => { try { c.destroy(); } catch(e){} });
+  chartReg = {};
+}
+
+function updateBadges() {
+  document.getElementById('recordsBadge').textContent = getVisible().length;
+  document.getElementById('mailBadge').textContent    = loadMail().length;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TAB ROUTING
+══════════════════════════════════════════════════════════ */
+function showTab(tab) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('tab-'+tab);
+  if (btn) btn.classList.add('active');
+  destroyCharts();
+  const el = document.getElementById('mainContent');
+  el.innerHTML = '';
+  if      (tab === 'dashboard') renderDashboard(el);
+  else if (tab === 'records')   renderRecords(el);
+  else if (tab === 'new')       renderForm(el, null);
+  else if (tab === 'mail')      renderMail(el);
+}
+
+/* ══════════════════════════════════════════════════════════
+   DASHBOARD
+══════════════════════════════════════════════════════════ */
+function renderDashboard(el) {
+  const visits = getVisible();
+  const total    = visits.length;
+  const scheduled = visits.filter(v => v.status === 'Scheduled').length;
+  const completed = visits.filter(v => v.status === 'Completed').length;
+  const critical  = visits.filter(v => v.criticality === 'Critical').length;
+
+  const byCat    = grp(visits,'category');
+  const byCrit   = grp(visits,'criticality');
+  const byStatus = grp(visits,'status');
+  const byPlant  = grp(visits,'plant');
+
+  const isDark = !darkMode;
+  const tc  = isDark ? '#8888aa' : '#6b6a60';
+  const gc  = isDark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)';
+  const tc2 = isDark ? '#f0f0f8' : '#1a1918';
+
+  el.innerHTML = `
+  <div class="section-header">
+    <div class="section-title">Command Centre</div>
+    <div class="section-sub">${currentUser.access === 'plant' ? currentUser.plant + ' plant' : 'All plants'} · ${total} total records</div>
+  </div>
+
+  <div class="metric-grid">
+    <div class="metric" style="--metric-accent:#e8c547">
+      <div class="metric-label">Total Visits</div>
+      <div class="metric-value">${total}</div>
+      <div class="metric-sub">${currentUser.access === 'plant' ? currentUser.plant : 'All Plants'}</div>
+    </div>
+    <div class="metric" style="--metric-accent:#4a90e2">
+      <div class="metric-label">Upcoming</div>
+      <div class="metric-value" style="color:var(--blue)">${scheduled}</div>
+      <div class="metric-sub">Scheduled</div>
+    </div>
+    <div class="metric" style="--metric-accent:#5abf7a">
+      <div class="metric-label">Completed</div>
+      <div class="metric-value" style="color:var(--green)">${completed}</div>
+      <div class="metric-sub">Done</div>
+    </div>
+    <div class="metric" style="--metric-accent:#e05555">
+      <div class="metric-label">Critical</div>
+      <div class="metric-value" style="color:var(--red)">${critical}</div>
+      <div class="metric-sub">Needs attention</div>
+    </div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-card">
+      <div class="chart-title">Visits by Category</div>
+      <div style="position:relative;height:200px">
+        <canvas id="c_cat" role="img" aria-label="Visits by category bar chart">Category distribution.</canvas>
+      </div>
+      <div class="legend" id="l_cat"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Criticality Breakdown</div>
+      <div style="position:relative;height:200px">
+        <canvas id="c_crit" role="img" aria-label="Criticality donut">Criticality distribution.</canvas>
+      </div>
+      <div class="legend" id="l_crit"></div>
+    </div>
+  </div>
+
+  <div class="chart-grid${currentUser.access !== 'plant' ? ' three' : ''}">
+    ${currentUser.access !== 'plant' ? `
+    <div class="chart-card">
+      <div class="chart-title">By Plant</div>
+      <div style="position:relative;height:160px">
+        <canvas id="c_plant" role="img" aria-label="Visits per plant">Per-plant count.</canvas>
+      </div>
+    </div>` : ''}
+    <div class="chart-card">
+      <div class="chart-title">Status Overview</div>
+      <div style="position:relative;height:160px">
+        <canvas id="c_status" role="img" aria-label="Status donut">Status overview.</canvas>
+      </div>
+      <div class="legend" id="l_status"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Stay Required</div>
+      <div style="position:relative;height:160px">
+        <canvas id="c_stay" role="img" aria-label="Stay required donut">Stay requirement.</canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Recent Visits</div>
+      <button class="btn btn-ghost btn-sm" onclick="showTab('records')">View all →</button>
+    </div>
+    <div class="table-wrap">${buildTable(visits.slice(0,5), false)}</div>
+  </div>`;
+
+  setTimeout(() => {
+    const catColors = ['#e8c547','#4a90e2','#5abf7a','#e05555','#e08540','#9b59b6','#16a085','#e74c3c'];
+    const critColors = { Critical:'#e05555', High:'#e08540', Medium:'#4a90e2', Low:'#5abf7a' };
+    const statusColors = { Scheduled:'#4a90e2', Confirmed:'#e8c547', Completed:'#5abf7a', Cancelled:'#e05555' };
+
+    const catKeys = Object.keys(byCat);
+    chartReg.cat = new Chart(document.getElementById('c_cat'), {
+      type:'bar',
+      data:{ labels:catKeys, datasets:[{ data:Object.values(byCat), backgroundColor:catKeys.map((_,i)=>catColors[i%catColors.length]), borderRadius:4, borderSkipped:false }]},
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:tc,font:{size:9},maxRotation:30},grid:{display:false}}, y:{ticks:{color:tc,stepSize:1},grid:{color:gc}} } }
+    });
+    buildLegend('l_cat', catKeys, catKeys.map((_,i)=>catColors[i%catColors.length]));
+
+    const critKeys = Object.keys(byCrit);
+    chartReg.crit = new Chart(document.getElementById('c_crit'), {
+      type:'doughnut',
+      data:{ labels:critKeys, datasets:[{ data:Object.values(byCrit), backgroundColor:critKeys.map(k=>critColors[k]||'#888'), borderWidth:0, hoverOffset:4 }]},
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'62%', plugins:{legend:{display:false}} }
+    });
+    buildLegend('l_crit', critKeys, critKeys.map(k=>critColors[k]||'#888'), Object.values(byCrit));
+
+    const statusKeys = Object.keys(byStatus);
+    chartReg.status = new Chart(document.getElementById('c_status'), {
+      type:'doughnut',
+      data:{ labels:statusKeys, datasets:[{ data:Object.values(byStatus), backgroundColor:statusKeys.map(k=>statusColors[k]||'#888'), borderWidth:0, hoverOffset:4 }]},
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'58%', plugins:{legend:{display:false}} }
+    });
+    buildLegend('l_status', statusKeys, statusKeys.map(k=>statusColors[k]||'#888'), Object.values(byStatus));
+
+    const stayY = visits.filter(v=>v.stay==='Y').length;
+    chartReg.stay = new Chart(document.getElementById('c_stay'), {
+      type:'doughnut',
+      data:{ labels:['Stay Required','No Stay'], datasets:[{ data:[stayY, visits.length-stayY], backgroundColor:['#e8c547','#2e2e52'], borderWidth:0 }]},
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'58%', plugins:{legend:{display:false}} }
+    });
+
+    if (currentUser.access !== 'plant' && document.getElementById('c_plant')) {
+      const plantKeys = Object.keys(byPlant);
+      chartReg.plant = new Chart(document.getElementById('c_plant'), {
+        type:'bar',
+        data:{ labels:plantKeys, datasets:[{ data:Object.values(byPlant), backgroundColor:'#e8c547', borderRadius:5, borderSkipped:false }]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:tc},grid:{display:false}}, y:{ticks:{color:tc,stepSize:1},grid:{color:gc}} } }
+      });
+    }
+  }, 60);
+}
+
+function buildLegend(id, keys, colors, vals=[]) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = keys.map((k,i) => `
+    <div class="legend-item">
+      <div class="legend-dot" style="background:${colors[i]}"></div>
+      <span>${k}${vals[i]!==undefined?' ('+vals[i]+')':''}</span>
+    </div>`).join('');
+}
+
+/* ══════════════════════════════════════════════════════════
+   RECORDS
+══════════════════════════════════════════════════════════ */
+let _visitsCache = [];
+
+function renderRecords(el) {
+  _visitsCache = getVisible();
+  el.innerHTML = `
+  ${currentUser.access === 'plant' ? `<div class="alert alert-info">ℹ Showing records for <strong>${currentUser.plant}</strong> plant only.</div>` : ''}
+  <div class="filters">
+    <div class="search-box"><input type="text" id="srch" placeholder="Search company, rep, focus, agenda…" oninput="filterRecords()"></div>
+    <select class="filter-sel" id="fCrit" onchange="filterRecords()">
+      <option value="">All Criticality</option>
+      ${CRITS.map(c=>`<option>${c}</option>`).join('')}
+    </select>
+    <select class="filter-sel" id="fStatus" onchange="filterRecords()">
+      <option value="">All Status</option>
+      ${STATUSES.map(s=>`<option>${s}</option>`).join('')}
+    </select>
+    ${currentUser.access !== 'plant' ? `<select class="filter-sel" id="fPlant" onchange="filterRecords()">
+      <option value="">All Plants</option>
+      ${PLANTS.map(p=>`<option>${p}</option>`).join('')}
+    </select>` : ''}
+    <button class="btn btn-gold btn-sm" onclick="showTab('new')">+ New Visit</button>
+    ${currentUser.access === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>` : ''}
+  </div>
+  <div class="table-wrap" id="recTable">${buildTable(_visitsCache, true)}</div>`;
+}
+
+function filterRecords() {
+  const q    = (document.getElementById('srch')?.value||'').toLowerCase();
+  const crit = document.getElementById('fCrit')?.value||'';
+  const stat = document.getElementById('fStatus')?.value||'';
+  const plt  = document.getElementById('fPlant')?.value||'';
+  const f = _visitsCache.filter(v => {
+    const txt = (v.company+v.rep+v.focus+v.agenda+v.coordinator+v.attendees).toLowerCase();
+    return (!q||txt.includes(q)) && (!crit||v.criticality===crit)
+        && (!stat||v.status===stat) && (!plt||v.plant===plt);
+  });
+  document.getElementById('recTable').innerHTML = buildTable(f, true);
+}
+
+/* ══════════════════════════════════════════════════════════
+   TABLE BUILDER
+══════════════════════════════════════════════════════════ */
+function buildTable(visits, actions) {
+  if (!visits.length) return `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">No records found.</div></div>`;
+  const canAdmin = currentUser.access === 'admin';
+  return `<table>
+    <thead><tr>
+      <th>Visit Date</th><th>Company</th><th>Representative</th>
+      <th>Category</th><th>Criticality</th><th>Plant</th>
+      <th>Status</th><th>Stay</th>
+      ${actions ? '<th style="text-align:right">Actions</th>' : ''}
+    </tr></thead>
+    <tbody>
+    ${visits.map(v => `<tr>
+      <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${v.visitDate}</td>
+      <td>
+        <div class="td-company">${xe(v.company)}</div>
+        <div class="td-sub">${xe(v.focus)}</div>
+      </td>
+      <td>${xe(v.rep)}</td>
+      <td><span class="badge badge-gold">${xe(v.category)}</span></td>
+      <td>${critBadge(v.criticality)}</td>
+      <td><span style="font-size:12px;color:var(--slate2)">${xe(v.plant)}</span></td>
+      <td>${statusBadge(v.status)}</td>
+      <td>${v.stay==='Y'
+        ? `<span class="badge badge-medium">✓ Yes</span>`
+        : `<span style="color:var(--slate);font-size:11px">No</span>`}</td>
+      ${actions ? `<td style="text-align:right;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openView('${v.id}')">View</button>
+        <button class="btn btn-ghost btn-sm" onclick="openEdit('${v.id}')">Edit</button>
+        ${canAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteVisit('${v.id}','${xe(v.company)}')">Del</button>` : ''}
+      </td>` : ''}
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   FORM
+══════════════════════════════════════════════════════════ */
+function renderForm(el, data) {
+  const d = data || { plant: currentUser.plant||'Pune', stay:'N', criticality:'Medium', category:'Business Development', status:'Scheduled' };
+  const isEdit = !!data;
+  const plantDisabled = currentUser.access === 'plant' ? 'disabled' : '';
+
+  el.innerHTML = `
+  <div class="form-panel">
+    <div class="form-panel-title">
+      ${isEdit ? 'Edit Visit Record' : 'New Customer Visit'}
+      <span>${isEdit ? 'Updating · ' + xe(d.company) : 'Entry Form'}</span>
+    </div>
+
+    <div class="form-grid g3">
+      <div class="form-section-label">Core Details</div>
+      <div class="fg">
+        <label>Confirmation Date <span class="req">*</span></label>
+        <input type="date" id="f_confirmDate" value="${d.confirmDate||''}">
+      </div>
+      <div class="fg">
+        <label>Visit Date <span class="req">*</span></label>
+        <input type="date" id="f_visitDate" value="${d.visitDate||''}">
+      </div>
+      <div class="fg">
+        <label>Plant <span class="req">*</span></label>
+        <select id="f_plant" ${plantDisabled}>
+          ${PLANTS.map(p=>`<option${d.plant===p?' selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-grid" style="margin-top:16px">
+      <div class="form-section-label">Visitor Information</div>
+      <div class="fg">
+        <label>Company Name <span class="req">*</span></label>
+        <input type="text" id="f_company" value="${xe(d.company||'')}" placeholder="e.g. Tata Steel Ltd">
+      </div>
+      <div class="fg">
+        <label>Representative Name <span class="req">*</span></label>
+        <input type="text" id="f_rep" value="${xe(d.rep||'')}" placeholder="Name & designation">
+      </div>
+    </div>
+
+    <div class="form-grid g4" style="margin-top:16px">
+      <div class="form-section-label">Classification</div>
+      <div class="fg">
+        <label>Visit Category <span class="req">*</span></label>
+        <select id="f_category">${CATEGORIES.map(c=>`<option${d.category===c?' selected':''}>${c}</option>`).join('')}</select>
+      </div>
+      <div class="fg">
+        <label>Criticality <span class="req">*</span></label>
+        <select id="f_criticality">${CRITS.map(c=>`<option${d.criticality===c?' selected':''}>${c}</option>`).join('')}</select>
+      </div>
+      <div class="fg">
+        <label>Focus Area <span class="req">*</span></label>
+        <input type="text" id="f_focus" value="${xe(d.focus||'')}" placeholder="e.g. New Order">
+      </div>
+      <div class="fg">
+        <label>Status</label>
+        <select id="f_status">${STATUSES.map(s=>`<option${d.status===s?' selected':''}>${s}</option>`).join('')}</select>
+      </div>
+    </div>
+
+    <div class="form-grid" style="margin-top:16px">
+      <div class="form-section-label">Coordination</div>
+      <div class="fg">
+        <label>Co-Ordinator <span class="req">*</span></label>
+        <input type="text" id="f_coordinator" value="${xe(d.coordinator||currentUser.name||'')}" placeholder="Internal coordinator name">
+      </div>
+      <div class="fg">
+        <label>Attendees</label>
+        <input type="text" id="f_attendees" value="${xe(d.attendees||'')}" placeholder="Comma-separated list">
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <div class="fg full">
+        <label>Agenda <span class="req">*</span></label>
+        <textarea id="f_agenda" placeholder="Full agenda and purpose of the visit…">${xe(d.agenda||'')}</textarea>
+      </div>
+    </div>
+
+    <div class="form-grid g4" style="margin-top:16px">
+      <div class="form-section-label">Accommodation</div>
+      <div class="fg">
+        <label>Stay Required</label>
+        <select id="f_stay" onchange="document.getElementById('hotelWrap').style.display=this.value==='Y'?'block':'none'">
+          <option value="N"${d.stay!=='Y'?' selected':''}>No</option>
+          <option value="Y"${d.stay==='Y'?' selected':''}>Yes</option>
+        </select>
+      </div>
+      <div id="hotelWrap" style="display:${d.stay==='Y'?'block':'none'}" class="fg">
+        <label>Proposed Hotel Name</label>
+        <input type="text" id="f_hotel" value="${xe(d.hotel||'')}" placeholder="Hotel name & location">
+      </div>
+      <div class="fg">
+        <label>Remarks</label>
+        <input type="text" id="f_remarks" value="${xe(d.remarks||'')}" placeholder="Any special instructions">
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="showTab('records')">Cancel</button>
+      <button class="btn btn-gold" id="saveBtn" onclick="saveVisit('${isEdit ? d.id : ''}')">
+        ${isEdit ? '✓ Update Record' : '✦ Save & Notify'}
+      </button>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SAVE / DELETE
+══════════════════════════════════════════════════════════ */
+function collectForm() {
+  const v = id => document.getElementById(id)?.value||'';
+  const required = ['f_confirmDate','f_visitDate','f_company','f_rep','f_focus','f_coordinator','f_agenda'];
+  for (const id of required) {
+    if (!v(id).trim()) {
+      toast('Validation Error', 'Please fill all required (*) fields.', true);
+      document.getElementById(id)?.focus();
+      return null;
+    }
+  }
+  return {
+    confirmDate: v('f_confirmDate'),
+    visitDate:   v('f_visitDate'),
+    plant:       currentUser.access==='plant' ? currentUser.plant : v('f_plant'),
+    company:     v('f_company').trim(),
+    rep:         v('f_rep').trim(),
+    category:    v('f_category'),
+    criticality: v('f_criticality'),
+    focus:       v('f_focus').trim(),
+    coordinator: v('f_coordinator').trim(),
+    agenda:      v('f_agenda').trim(),
+    attendees:   v('f_attendees').trim(),
+    stay:        v('f_stay'),
+    hotel:       v('f_hotel').trim(),
+    remarks:     v('f_remarks').trim(),
+    status:      v('f_status'),
+  };
+}
+
+function saveVisit(editId) {
+  const data = collectForm();
+  if (!data) return;
+  const btn = document.getElementById('saveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  let isEdit = !!editId;
+
+  if (isEdit) {
+    const existing = _visitsData.find(v => v.id === editId) || {};
+    saveOneVisit({ ...existing, ...data, updatedAt: new Date().toISOString() });
+  } else {
+    data.id = 'v' + Date.now();
+    data.createdAt = new Date().toISOString();
+    saveOneVisit(data);
+  }
+
+  logMail(data, isEdit);
+  updateBadges();
+  toast(isEdit ? '✓ Record Updated' : '✦ Visit Saved', `${data.company} — mail notification logged`);
+  closeModal();
+  showTab('records');
+}
+
+function deleteVisit(id, company) {
+  if (!confirm(`Delete the visit record for "${company}"?\n\nThis action cannot be undone.`)) return;
+  deleteOneVisit(id);
+  updateBadges();
+  toast('Deleted', company + ' record removed.');
+  showTab('records');
+}
+
+/* ══════════════════════════════════════════════════════════
+   VIEW / EDIT MODALS
+══════════════════════════════════════════════════════════ */
+function openView(id) {
+  const v = loadVisits().find(x => x.id === id);
+  if (!v) return;
+  document.getElementById('modalTitle').textContent = v.company;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="detail-grid">
+      <div class="detail-item"><div class="detail-label">Confirmation Date</div><div class="detail-value em">${v.confirmDate}</div></div>
+      <div class="detail-item"><div class="detail-label">Visit Date</div><div class="detail-value em">${v.visitDate}</div></div>
+      <div class="detail-item"><div class="detail-label">Plant</div><div class="detail-value em">${v.plant}</div></div>
+      <div class="detail-item"><div class="detail-label">Representative</div><div class="detail-value">${xe(v.rep)}</div></div>
+      <div class="detail-item"><div class="detail-label">Category</div><div class="detail-value"><span class="badge badge-gold">${xe(v.category)}</span></div></div>
+      <div class="detail-item"><div class="detail-label">Criticality</div><div class="detail-value">${critBadge(v.criticality)}</div></div>
+      <div class="detail-item"><div class="detail-label">Focus Area</div><div class="detail-value em">${xe(v.focus)}</div></div>
+      <div class="detail-item"><div class="detail-label">Coordinator</div><div class="detail-value">${xe(v.coordinator)}</div></div>
+      <div class="detail-item"><div class="detail-label">Status</div><div class="detail-value">${statusBadge(v.status)}</div></div>
+      <div class="detail-item detail-full"><div class="detail-label">Attendees</div><div class="detail-value">${xe(v.attendees)||'—'}</div></div>
+      <div class="detail-item detail-full"><div class="detail-label">Agenda</div><div class="detail-value" style="line-height:1.6">${xe(v.agenda)}</div></div>
+      <div class="detail-item"><div class="detail-label">Stay Required</div><div class="detail-value">${v.stay==='Y'?'<span class="badge badge-medium">Yes</span>':'No'}</div></div>
+      ${v.stay==='Y'?`<div class="detail-item"><div class="detail-label">Proposed Hotel</div><div class="detail-value em">${xe(v.hotel||'TBD')}</div></div>`:''}
+      ${v.remarks?`<div class="detail-item detail-full"><div class="detail-label">Remarks</div><div class="detail-value">${xe(v.remarks)}</div></div>`:''}
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:14px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+      <button class="btn btn-gold" onclick="closeModal();openEdit('${v.id}')">Edit Record</button>
+    </div>`;
+  document.getElementById('overlay').classList.add('open');
+}
+
+function openEdit(id) {
+  const v = loadVisits().find(x => x.id === id);
+  if (!v) return;
+  document.getElementById('modalTitle').textContent = 'Edit — ' + v.company;
+  const tmp = document.createElement('div');
+  renderForm(tmp, v);
+  document.getElementById('modalBody').innerHTML = tmp.innerHTML;
+  document.getElementById('overlay').classList.add('open');
+  document.getElementById('hotelWrap').style.display = v.stay==='Y'?'block':'none';
+  document.getElementById('saveBtn').onclick = () => { closeModal(); saveVisitFromModal(id); };
+  document.querySelectorAll('#modalBody .btn-ghost')[0].onclick = closeModal;
+}
+
+function saveVisitFromModal(editId) {
+  const data = collectForm();
+  if (!data) return;
+  const existing = _visitsData.find(v => v.id === editId) || {};
+  saveOneVisit({ ...existing, ...data, updatedAt: new Date().toISOString() });
+  logMail(data, true);
+  updateBadges();
+  toast('✓ Record Updated', `${data.company} — mail notification logged`);
+  showTab('records');
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('open');
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAIL LOG
+══════════════════════════════════════════════════════════ */
+function logMail(record, isUpdate) {
+  const logs = loadMail();
+  logs.unshift({
+    id: 'm' + Date.now(),
+    time: new Date().toLocaleString('en-IN'),
+    subject: `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${record.visitDate}`,
+    to: `plant-${record.plant.toLowerCase().replace(/\s/g,'')}@company.com, management@company.com`,
+    body: `${record.category} | ${record.criticality} criticality | Coordinator: ${record.coordinator} | Status: ${record.status}`,
+    plant: record.plant,
+    isUpdate,
+  });
+  saveMail(logs.slice(0, 100)); // keep last 100
+  document.getElementById('mailBadge').textContent = logs.length + 1 > 100 ? '100+' : logs.length + 1;
+}
+
+function renderMail(el) {
+  const logs = loadMail();
+  el.innerHTML = `
+  <div class="section-header">
+    <div class="section-title">Mail Notification Log</div>
+    <div class="section-sub">Azure Communication Services · auto-sent on every create/update</div>
+  </div>
+  <div class="alert alert-warn" style="margin-bottom:18px">
+    ⚠ This is a GitHub Pages demo — emails are <strong>simulated and logged locally</strong>.
+    In production (Firebase deploy), actual emails are sent via Azure Communication Services Cloud Functions.
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Sent Notifications (${logs.length})</div>
+      ${logs.length?`<button class="btn btn-ghost btn-sm" onclick="if(confirm('Clear mail log?')){saveMail([]);showTab('mail')}">Clear log</button>`:''}
+    </div>
+    ${!logs.length ? `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">No emails sent yet. Create or edit a visit record to log a notification.</div></div>` : ''}
+    ${logs.map(m => `
+    <div class="mail-item">
+      <div class="mail-dot">${m.isUpdate?'✏':'✦'}</div>
+      <div class="mail-body">
+        <div class="mail-subject">${xe(m.subject)}</div>
+        <div class="mail-meta">To: ${xe(m.to)}</div>
+        <div class="mail-meta">${xe(m.body)}</div>
+        <div class="mail-sent">✓ Queued via Azure Communication Services · ${m.time}</div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   CSV EXPORT
+══════════════════════════════════════════════════════════ */
+function exportCSV() {
+  const visits = getVisible();
+  const headers = ['ID','Confirm Date','Visit Date','Plant','Company','Representative','Category','Criticality','Focus Area','Agenda','Coordinator','Attendees','Stay','Hotel','Remarks','Status','Created At'];
+  const rows = visits.map(v => [v.id,v.confirmDate,v.visitDate,v.plant,v.company,v.rep,v.category,v.criticality,v.focus,v.agenda,v.coordinator,v.attendees,v.stay,v.hotel||'',v.remarks||'',v.status,v.createdAt||''].map(c => `"${String(c).replace(/"/g,'""')}"`).join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `plantvisit_export_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  toast('Export Ready', `${visits.length} records exported.`);
+}
+
+/* ══════════════════════════════════════════════════════════
+   UTILITIES
+══════════════════════════════════════════════════════════ */
+function critBadge(c) {
+  const map = { Critical:'badge-critical', High:'badge-high', Medium:'badge-medium', Low:'badge-low' };
+  return `<span class="badge ${map[c]||'badge-low'}">${c||'—'}</span>`;
+}
+function statusBadge(s) {
+  const map = { Scheduled:'badge-status-s', Confirmed:'badge-status-c', Completed:'badge-status-d', Cancelled:'badge-status-x' };
+  return `<span class="badge ${map[s]||'badge-status-s'}">${s||'—'}</span>`;
+}
+function grp(arr, key) {
+  return arr.reduce((a,v)=>{ const k=v[key]||'Other'; a[k]=(a[k]||0)+1; return a; },{});
+}
+function xe(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let _toastTimer;
+function toast(title, sub, isErr=false) {
+  const t = document.getElementById('toast');
+  document.getElementById('toastTitle').textContent = title;
+  document.getElementById('toastSub').textContent   = sub;
+  t.style.borderLeft = isErr ? '3px solid var(--red)' : '3px solid var(--gold)';
+  t.classList.remove('show');
+  void t.offsetWidth;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 3600);
+}
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => {
+  // Keyboard shortcut: N = new visit
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') showTab('new');
+  });
+
+  // Close modal on overlay click
+  document.getElementById('overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('overlay')) closeModal();
+  });
+
+  // Start Firestore listeners — app boots inside bootApp() once data arrives
+  initFirestoreListeners();
+});
+</script>
+</body>
+</html>
