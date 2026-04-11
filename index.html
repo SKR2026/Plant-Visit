@@ -660,8 +660,17 @@ function initFirestoreListeners() {
 
   USERS_DOC.onSnapshot(doc => {
     if (doc.exists && doc.data().users) {
-      // Merge: keep DEFAULT_USERS as fallback so built-in accounts always work
-      _usersData = { ...DEFAULT_USERS, ...doc.data().users };
+      // Merge Firestore users on top of DEFAULT_USERS, but always preserve
+      // DEFAULT_USERS passwords/access for built-in accounts so login works
+      const firestoreUsers = doc.data().users;
+      const merged = { ...DEFAULT_USERS, ...firestoreUsers };
+      // Re-apply DEFAULT_USERS credentials for built-in accounts to prevent lockout
+      Object.keys(DEFAULT_USERS).forEach(key => {
+        if (merged[key]) {
+          merged[key] = { ...merged[key], password: DEFAULT_USERS[key].password, access: DEFAULT_USERS[key].access };
+        }
+      });
+      _usersData = merged;
     }
   }, e => console.error(e));
 
@@ -691,7 +700,8 @@ function doLogin() {
   const errEl = document.getElementById('loginErr');
   errEl.classList.remove('show');
 
-  const user = _usersData[username];
+  // If Firebase hasn't loaded yet, try against DEFAULT_USERS directly as fallback
+  const user = _usersData[username] || DEFAULT_USERS[username];
   if (!user || user.password !== password) {
     errEl.classList.add('show');
     document.getElementById('loginPass').value = '';
@@ -1862,7 +1872,7 @@ function deletePlant(idx, name) {
 
 document.addEventListener('DOMContentLoaded', () => {
   initPlantsListener();
-});
+
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeModal();
   });
