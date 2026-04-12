@@ -635,7 +635,22 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
     </div>
     <button class="btn-login" onclick="doLogin()">Sign In →</button>
     <div class="login-direct-info" id="loginDirectInfo" style="display:none">
-      🔗 You were directed here from a notification email. Sign in to view the visit record.
+      🔗 Opening visit record from notification email…
+    </div>
+    <div id="guestBtnWrap" style="margin-top:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin:14px 0 10px">
+        <div style="flex:1;height:1px;background:var(--border2)"></div>
+        <span style="font-size:11px;color:var(--slate);white-space:nowrap">or</span>
+        <div style="flex:1;height:1px;background:var(--border2)"></div>
+      </div>
+      <button class="btn-login" id="guestLoginBtn"
+        style="background:transparent;border:1.5px solid var(--gold-bdr);color:var(--gold);font-size:13px;padding:11px 0;"
+        onclick="doGuestLogin()">
+        👁 View as Guest — No Login Required
+      </button>
+      <p style="text-align:center;font-size:11px;color:var(--slate);margin-top:8px">
+        Read-only access · No account needed
+      </p>
     </div>
   </div>
 </div>
@@ -661,7 +676,8 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
       <div class="user-role" id="userRole">Administrator</div>
     </div>
     <div class="user-dropdown" id="userDropdown">
-      <div class="user-dd-item" onclick="openChangePassword()">🔑 Change Password</div>
+      <div class="user-dd-item" id="ddChangePass" onclick="openChangePassword()">🔑 Change Password</div>
+      <div class="user-dd-item" id="ddSignIn" style="display:none" onclick="doLogout()">🔐 Sign In with Account</div>
       <div class="user-dd-divider"></div>
       <div class="user-dd-item danger" onclick="doLogout()">↩ Sign Out</div>
     </div>
@@ -862,9 +878,17 @@ let _pendingVisitId = null; // for direct-link navigation
   const visitId = params.get('visit');
   if (visitId) {
     _pendingVisitId = visitId;
-    // Auto-login as guest — no password required when coming via email link
-    // autoLoginGuest() waits for Firestore to be ready before activating
-    document.addEventListener('DOMContentLoaded', () => autoLoginGuest(visitId));
+    document.addEventListener('DOMContentLoaded', () => {
+      // Show info banner + guest button on login screen (visible for a brief moment)
+      const info = document.getElementById('loginDirectInfo');
+      const wrap = document.getElementById('guestBtnWrap');
+      const btn  = document.getElementById('guestLoginBtn');
+      if (info) info.style.display = 'block';
+      if (wrap) wrap.style.display = 'block';
+      if (btn)  btn.textContent = '👁 Opening visit record…';
+      // Auto-login as guest immediately — no password or click needed
+      autoLoginGuest(visitId);
+    });
   }
 })();
 
@@ -980,28 +1004,24 @@ function activateSession(user, id, visitId) {
   document.getElementById('tab-settings').style.display = currentUser.access === 'admin' ? '' : 'none';
   document.getElementById('tab-upload').style.display  = currentUser.access === 'admin' ? '' : 'none';
   document.getElementById('tab-mail').style.display = currentUser.access === 'plant' ? 'none' : '';
+  document.getElementById('tab-new').style.display = (id === '__guest__') ? 'none' : '';
+
+  // Guest-specific dropdown tweaks
+  const isGuestUser = (id === '__guest__');
+  const ddCP = document.getElementById('ddChangePass');
+  const ddSI = document.getElementById('ddSignIn');
+  if (ddCP) ddCP.style.display = isGuestUser ? 'none' : '';
+  if (ddSI) ddSI.style.display = isGuestUser ? '' : 'none';
 
   updateBadges();
 
   // Start daily-digest scheduler (fires at configured time once per day)
   startDailyDigestScheduler();
 
-  // Navigate — if a visitId was supplied, go straight to that record
+  // Navigate — if a visitId was supplied, go to records tab (record opened by caller)
   if (visitId) {
     _pendingVisitId = null;
     showTab('records');
-    setTimeout(() => {
-      const v = _visitsData.find(x => x.id === visitId);
-      if (v) {
-        if (currentUser.access === 'plant' && v.plant !== currentUser.plant) {
-          toast('Access Restricted', 'This visit is not for your plant.', true);
-        } else {
-          openView(visitId);
-        }
-      } else {
-        toast('Not Found', 'The linked visit record was not found.', true);
-      }
-    }, 300);
   } else {
     showTab('dashboard');
   }
@@ -1019,22 +1039,23 @@ function autoLoginGuest(visitId) {
     access: 'management', plant: null, password: '', email: ''
   };
 
-  // If Firestore data is already loaded, open immediately; otherwise wait.
-  if (_appReady) {
-    activateSession(GUEST, '__guest__', visitId);
-  } else {
-    // Poll until bootApp() sets _appReady, then activate
-    const poll = setInterval(() => {
-      if (_appReady) {
-        clearInterval(poll);
-        activateSession(GUEST, '__guest__', visitId);
+  // Activate immediately — hide login screen right away, no password needed
+  activateSession(GUEST, '__guest__', visitId || null);
+
+  // If a specific visit was requested, wait for data then open it
+  if (visitId) {
+    const tryOpen = (attempts) => {
+      const v = _visitsData.find(x => x.id === visitId);
+      if (v) {
+        openView(visitId);
+      } else if (attempts > 0) {
+        setTimeout(() => tryOpen(attempts - 1), 400);
+      } else {
+        toast('Not Found', 'The linked visit record could not be found.', true);
       }
-    }, 100);
-    // Fallback: force-open after 4 s even if Firestore is slow
-    setTimeout(() => {
-      clearInterval(poll);
-      if (!currentUser) activateSession(GUEST, '__guest__', visitId);
-    }, 4000);
+    };
+    // Try immediately, then retry up to 15 times (6 seconds total)
+    setTimeout(() => tryOpen(15), 200);
   }
 }
 
@@ -1053,7 +1074,13 @@ function doLogin() {
   }
 
   localStorage.setItem('pv_session', JSON.stringify({ id: username, name: user.name }));
-  activateSession(user, username, _pendingVisitId || null);
+  activateSession(user, username, null);
+  _pendingVisitId = null;
+}
+
+/** Guest login — no password. Opens the dashboard (or a specific visit if one is pending). */
+function doGuestLogin() {
+  autoLoginGuest(_pendingVisitId || null);
   _pendingVisitId = null;
 }
 
@@ -1065,6 +1092,11 @@ function doLogout() {
   document.getElementById('appNav').style.display = 'none';
   document.getElementById('mainContent').style.display = 'none';
   document.getElementById('loginScreen').classList.remove('hidden');
+  // Hide guest UI elements when returning to login
+  const gw = document.getElementById('guestBtnWrap');
+  if (gw) gw.style.display = 'none';
+  const li = document.getElementById('loginDirectInfo');
+  if (li) li.style.display = 'none';
   document.getElementById('loginUser').value = '';
   document.getElementById('loginPass').value = '';
   document.getElementById('loginErr').classList.remove('show');
@@ -2078,7 +2110,7 @@ function logMail(record, isUpdate) {
                style="display:inline-block;padding:14px 32px;font-family:'Times New Roman',Times,serif;font-size:14px;
                       font-weight:700;color:#0f0f1a;text-decoration:none;
                       letter-spacing:0.3px;border-radius:50px;">
-              View Visit Record →
+              👁 View Visit Record — No Login Required →
             </a>
           </td>
         </tr>
@@ -2096,8 +2128,8 @@ function logMail(record, isUpdate) {
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td style="font-family:'Times New Roman',Times,serif;font-size:14px;color:#8888aa;line-height:1.6;">
-            This notification was auto-generated by <strong style="color:#aaaac8;">PlantVisit · ${company}</strong><br>
-            via Microsoft Graph API. Please do not reply to this email.
+            This notification was auto-generated by <strong style="color:#aaaac8;">PlantVisit · ${company}</strong>.<br>
+            Clicking the button above opens the visit record instantly — <strong style="color:#aaaac8;">no login required</strong>.
           </td>
           <td align="right" style="font-size:11px;color:#8888aa;white-space:nowrap;vertical-align:top;">
             ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
