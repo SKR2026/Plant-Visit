@@ -1363,6 +1363,7 @@ function filterRecords() {
     return (!q||txt.includes(q))&&(!crit||v.criticality===crit)&&(!stat||v.status===stat)&&(!plt||v.plant===plt);
   });
   document.getElementById('recTable').innerHTML = buildTable(f, true);
+  restoreBulkCheckboxes();
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1374,6 +1375,13 @@ function fmtDate(d) {
   const parts = d.split('-');
   if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0].slice(2)}`;
   return d;
+}
+function fmtDateRange(start, end) {
+  if (!start) return '—';
+  const s = fmtDate(start);
+  if (!end || end === start) return s;
+  const days = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+  return `${s} → ${fmtDate(end)} (${days} day${days !== 1 ? 's' : ''})`;
 }
 
 function buildTable(visits, actions) {
@@ -1466,6 +1474,35 @@ function renderForm(el, data) {
 /* ══════════════════════════════════════════════════════════
    SAVE / DELETE
 ══════════════════════════════════════════════════════════ */
+function validateVisitDateRange() {
+  const startEl = document.getElementById('f_visitDate');
+  const endEl   = document.getElementById('f_visitDateEnd');
+  if (!startEl || !endEl) return;
+  const start = startEl.value, end = endEl.value;
+  if (start) endEl.min = start;
+  let hint = document.getElementById('visitDateHint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'visitDateHint';
+    hint.style.cssText = 'font-size:11px;margin-top:4px;';
+    endEl.parentElement.appendChild(hint);
+  }
+  if (start && end && end >= start) {
+    const days = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+    hint.textContent = days === 1 ? '📅 Single-day visit' : `📅 ${days}-day visit (${fmtDate(start)} → ${fmtDate(end)})`;
+    hint.style.color = 'var(--gold)';
+    endEl.style.borderColor = '';
+  } else if (end && end < start) {
+    hint.textContent = '⚠ "To" date cannot be before "From" date';
+    hint.style.color = 'var(--red)';
+    endEl.style.borderColor = 'var(--red)';
+  } else {
+    hint.textContent = start ? '📅 Single-day — add "To" date for multi-day visit' : '';
+    hint.style.color = 'var(--slate)';
+    endEl.style.borderColor = '';
+  }
+}
+
 function collectForm() {
   const v = id => document.getElementById(id)?.value||'';
   const req = ['f_confirmDate','f_visitDate','f_company','f_rep','f_focus','f_coordinator','f_agenda'];
@@ -1474,7 +1511,9 @@ function collectForm() {
   }
   const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
   if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
-  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
+  const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
+  if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
+  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
 }
 
 function saveVisit(editId) {
@@ -1590,14 +1629,6 @@ function syncBulkBar() {
   if (plural) plural.textContent = n === 1 ? '' : 's';
   if (btn)    btn.disabled       = n === 0;
 }
-
-/** Also reset bulk state whenever filterRecords re-renders the table */
-const _origFilterRecords = filterRecords;
-filterRecords = function() {
-  _origFilterRecords();
-  // After the table re-renders, restore checkbox ticks and bar for still-visible IDs
-  restoreBulkCheckboxes();
-};
 
 function restoreBulkCheckboxes() {
   document.querySelectorAll('.row-chk').forEach(cb => {
@@ -3608,6 +3639,10 @@ function parseUploadCSV(text) {
       errs.push('confirm_date must be YYYY-MM-DD');
     if (row.visit_date && !dateRe.test(row.visit_date))
       errs.push('visit_date must be YYYY-MM-DD');
+    if (row.visit_date_end && !dateRe.test(row.visit_date_end))
+      errs.push('visit_date_end must be YYYY-MM-DD');
+    if (row.visit_date && row.visit_date_end && row.visit_date_end < row.visit_date)
+      errs.push('visit_date_end cannot be before visit_date');
     if (row.visit_date_end && !dateRe.test(row.visit_date_end))
       errs.push('visit_date_end must be YYYY-MM-DD');
     if (row.visit_date && row.visit_date_end && row.visit_date_end < row.visit_date)
