@@ -535,7 +535,7 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 
 /* ─── PAGE LOADER ────────────────────────────────────── */
 #pageLoader{position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:1000;flex-direction:column;gap:16px;transition:opacity .4s ease}
-#pageLoader.hidden{opacity:0;pointer-events:none}
+#pageLoader.hidden{opacity:0;pointer-events:none;display:none}
 .loader-logo{font-family:var(--font-display);font-size:36px;color:var(--gold);letter-spacing:-1px}
 .loader-sub{font-size:12px;color:var(--slate);letter-spacing:.4px}
 .loader-bar{width:120px;height:2px;background:var(--navy4);border-radius:2px;overflow:hidden}
@@ -721,8 +721,15 @@ const firebaseConfig = {
   appId:             "1:1011690659933:web:f57e43ee0267a475682db4",
   measurementId:     "G-67NGHMK0QR"
 };
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+// Null-safe Firestore stub used when Firebase is unavailable
+const _nullDoc = { set:()=>Promise.resolve(), delete:()=>Promise.resolve(), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({exists:false,data:()=>({}),docs:[]}),0); return ()=>{};}, get:()=>Promise.resolve({exists:false,data:()=>({})}) };
+const _nullCol = { doc:()=>_nullDoc, orderBy:()=>({onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({docs:[]}),0); return ()=>{}; }}), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({docs:[]}),0); return ()=>{}; }, add:()=>Promise.resolve(_nullDoc), limit:()=>({get:()=>Promise.resolve({docs:[]})}) };
+const _nullDb = { collection:()=>_nullCol, batch:()=>({set:()=>{},delete:()=>{},commit:()=>Promise.resolve()}) };
+let db = _nullDb;
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+} catch(e) { console.warn('Firebase init failed — running in offline mode:', e); }
 const VISITS_COL = 'visits';
 const MAIL_DOC   = db.collection('config').doc('mailLogs');
 const USERS_DOC  = db.collection('config').doc('appUsers');
@@ -2988,7 +2995,7 @@ function renderRecords(el) {
 /* ══════════════════════════════════════════════════════════
    PLANT MANAGEMENT (Admin only)
 ══════════════════════════════════════════════════════════ */
-const PLANTS_DOC = db.collection('config').doc('appPlants');
+const PLANTS_DOC = db.collection('config').doc('appPlants'); // safe: db is null-safe
 
 function savePlants() {
   PLANTS_DOC.set({ plants: PLANTS }).catch(e => console.error(e));
@@ -3256,18 +3263,27 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('themeBtn').textContent = '☀️';
   }
 
-  // Sign in anonymously to satisfy Firestore auth rules, then start listeners
-  firebase.auth().signInAnonymously()
-    .then(() => initFirestoreListeners())
-    .catch(err => {
-      console.error('Firebase anonymous auth failed:', err);
-      initFirestoreListeners(); // still try; onSnapshot error handler will show offline state
-    });
-
-  // Hide loader quickly and show login
+  // Hide loader and show login screen quickly regardless of Firebase state
   setTimeout(() => {
     document.getElementById('pageLoader').classList.add('hidden');
-  }, 1200);
+  }, 800);
+  // Hard failsafe - force show login if still loading after 3s
+  setTimeout(() => {
+    const pl = document.getElementById('pageLoader');
+    if (pl && !pl.classList.contains('hidden')) pl.classList.add('hidden');
+  }, 3000);
+
+  // Sign in anonymously to satisfy Firestore auth rules, then start listeners
+  try {
+    firebase.auth().signInAnonymously()
+      .then(() => initFirestoreListeners())
+      .catch(err => {
+        console.warn('Firebase anonymous auth failed:', err);
+        try { initFirestoreListeners(); } catch(e2) { console.warn('Firestore listener error:', e2); }
+      });
+  } catch(e) {
+    console.warn('Firebase init error:', e);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════
