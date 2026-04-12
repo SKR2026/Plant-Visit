@@ -953,8 +953,8 @@ function initFirestoreListeners() {
         const _ls = document.getElementById('loaderStatus'); if (_ls) _ls.textContent = 'Seeding sample data…';
         const batch = db.batch();
         SEED_DATA.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
-        batch.commit().then(() => { _visitsData = [...SEED_DATA]; bootApp(); }).catch(() => { _visitsData = [...SEED_DATA]; bootApp(); });
-      } else { bootApp(); }
+        batch.commit().then(() => { _visitsData = [...SEED_DATA]; bootApp(); refreshActiveTab(); }).catch(() => { _visitsData = [...SEED_DATA]; bootApp(); refreshActiveTab(); });
+      } else { bootApp(); refreshActiveTab(); }
     } else {
       updateBadges();
       const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
@@ -1002,6 +1002,23 @@ function bootApp() {
     document.getElementById('themeBtn').textContent = '☀️';
   }
   setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
+}
+
+/**
+ * refreshActiveTab()
+ * Re-renders whichever tab is currently active after the first Firestore
+ * snapshot arrives. This ensures the dashboard (and any other tab) shows
+ * real data when opened via a direct/guest link — instead of showing all
+ * zeroes because the data hadn't loaded yet when the tab first rendered.
+ */
+function refreshActiveTab() {
+  if (!_appReady) return;
+  const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
+  // Only refresh if the app chrome is already visible (i.e. session is active)
+  if (document.getElementById('mainContent')?.style.display === 'block') {
+    updateBadges();
+    showTab(activeTab);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════
