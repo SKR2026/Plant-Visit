@@ -193,6 +193,73 @@ body{background:var(--navy);color:var(--white);font-family:var(--font);font-size
 }
 .theme-toggle:hover{border-color:var(--gold-bdr);color:var(--gold)}
 
+/* ─── FIREBASE STATUS INDICATOR ─────────────────────────── */
+.fb-status {
+  display:flex;align-items:center;gap:7px;
+  padding:5px 11px;border-radius:20px;
+  font-size:11px;font-weight:500;letter-spacing:.2px;
+  border:1px solid transparent;
+  transition:all .3s ease;cursor:default;
+  white-space:nowrap;
+}
+.fb-status-dot {
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+  transition:background .3s;
+}
+.fb-status.connecting {
+  background:var(--navy3);border-color:var(--border);color:var(--slate);
+}
+.fb-status.connecting .fb-status-dot {
+  background:var(--slate);
+  animation:fb-pulse-grey 1.4s ease-in-out infinite;
+}
+.fb-status.live {
+  background:rgba(90,191,122,0.10);border-color:rgba(90,191,122,0.25);color:var(--green);
+}
+.fb-status.live .fb-status-dot {
+  background:var(--green);
+  animation:fb-pulse-green 2s ease-in-out infinite;
+}
+.fb-status.error {
+  background:var(--red-bg);border-color:rgba(224,85,85,.25);color:var(--red);
+}
+.fb-status.error .fb-status-dot {
+  background:var(--red);
+}
+@keyframes fb-pulse-green {
+  0%,100%{box-shadow:0 0 0 0 rgba(90,191,122,.5)}
+  50%{box-shadow:0 0 0 5px rgba(90,191,122,0)}
+}
+@keyframes fb-pulse-grey {
+  0%,100%{opacity:1}50%{opacity:.3}
+}
+
+/* ─── FIREBASE STATUS DASHBOARD BANNER ───────────────────── */
+.fb-banner {
+  display:flex;align-items:center;gap:12px;
+  padding:10px 16px;border-radius:var(--radius-lg);
+  margin-bottom:16px;font-size:12px;
+  border:1px solid transparent;
+  transition:all .3s ease;
+}
+.fb-banner.connecting {
+  background:var(--navy3);border-color:var(--border);color:var(--slate);
+}
+.fb-banner.live {
+  background:rgba(90,191,122,0.08);border-color:rgba(90,191,122,0.20);color:var(--green);
+}
+.fb-banner.error {
+  background:var(--red-bg);border-color:rgba(224,85,85,.20);color:var(--red);
+}
+.fb-banner-dot {
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+}
+.fb-banner.connecting .fb-banner-dot{background:var(--slate);animation:fb-pulse-grey 1.4s ease-in-out infinite}
+.fb-banner.live .fb-banner-dot{background:var(--green);animation:fb-pulse-green 2s ease-in-out infinite}
+.fb-banner.error .fb-banner-dot{background:var(--red)}
+.fb-banner-text strong{font-weight:600}
+.fb-banner-meta{margin-left:auto;font-size:10px;opacity:.75;white-space:nowrap}
+
 /* ─── NAV ────────────────────────────────────────────── */
 .nav {
   background:var(--navy2);border-bottom:1px solid var(--border);
@@ -497,6 +564,10 @@ select.filter-sel:focus{outline:none;border-color:var(--gold-bdr)}
     </div>
   </div>
   <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
+  <div class="fb-status connecting" id="fbStatusPill" title="Firebase Firestore connection status">
+    <div class="fb-status-dot"></div>
+    <span id="fbStatusLabel">Connecting…</span>
+  </div>
 </header>
 
 <!-- NAV -->
@@ -552,6 +623,66 @@ const VISITS_COL = 'visits';
 const MAIL_DOC   = db.collection('config').doc('mailLogs');
 const USERS_DOC  = db.collection('config').doc('appUsers');
 const SETTINGS_DOC = db.collection('config').doc('appSettings');
+
+/* ══════════════════════════════════════════════════════════
+   FIREBASE LIVE STATUS
+══════════════════════════════════════════════════════════ */
+let _fbStatus = 'connecting'; // 'connecting' | 'live' | 'error'
+let _fbLastSync = null;
+let _fbListenerCount = 0;
+let _fbSyncTimer = null;
+
+function setFbStatus(state, detail) {
+  _fbStatus = state;
+  if (state === 'live') _fbLastSync = new Date();
+
+  const pill  = document.getElementById('fbStatusPill');
+  const label = document.getElementById('fbStatusLabel');
+  if (!pill || !label) return;
+
+  pill.className = 'fb-status ' + state;
+
+  const labels = {
+    connecting: 'Connecting…',
+    live:       'Firebase Live',
+    error:      'Offline'
+  };
+  label.textContent = detail || labels[state] || state;
+
+  // Update dashboard banner if visible
+  updateFbBanner();
+}
+
+function updateFbBanner() {
+  const banner = document.getElementById('fbLiveBanner');
+  if (!banner) return;
+  const dot  = banner.querySelector('.fb-banner-dot');
+  const text = banner.querySelector('.fb-banner-text');
+  const meta = banner.querySelector('.fb-banner-meta');
+
+  banner.className = 'fb-banner ' + _fbStatus;
+
+  const since = _fbLastSync
+    ? 'Last sync ' + _fbLastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})
+    : '';
+
+  if (_fbStatus === 'live') {
+    text.innerHTML = `<strong>🔥 Firebase Firestore Live</strong> — Data is syncing in real-time from project <code style="font-size:10px;background:rgba(90,191,122,.15);padding:1px 5px;border-radius:3px">skr-task</code>`;
+    meta.textContent = since;
+  } else if (_fbStatus === 'error') {
+    text.innerHTML = `<strong>⚠ Firebase Offline</strong> — Real-time sync unavailable. Showing cached data.`;
+    meta.textContent = since;
+  } else {
+    text.innerHTML = `<strong>Connecting to Firebase…</strong> — Establishing Firestore connection`;
+    meta.textContent = '';
+  }
+}
+
+// Refresh the "last sync" time on the banner every second
+function startSyncClock() {
+  if (_fbSyncTimer) return;
+  _fbSyncTimer = setInterval(() => { updateFbBanner(); }, 5000);
+}
 
 /* ══════════════════════════════════════════════════════════
    CONSTANTS & DATA
@@ -646,6 +777,8 @@ function saveSettings() {
 
 function initFirestoreListeners() {
   db.collection(VISITS_COL).orderBy('createdAt','asc').onSnapshot(snapshot => {
+    setFbStatus('live');
+    startSyncClock();
     _visitsData = snapshot.docs.map(d => d.data());
     if (!_appReady) {
       if (_visitsData.length === 0) {
@@ -659,7 +792,7 @@ function initFirestoreListeners() {
       const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
       showTab(activeTab);
     }
-  }, err => { console.error(err); if (!_appReady) bootApp(); });
+  }, err => { console.error(err); setFbStatus('error'); if (!_appReady) bootApp(); });
 
   MAIL_DOC.onSnapshot(doc => {
     _mailData = doc.exists ? (doc.data().logs || []) : [];
@@ -969,6 +1102,12 @@ function renderDashboard(el) {
   })() : '';
 
   el.innerHTML = `
+  <div class="fb-banner connecting" id="fbLiveBanner">
+    <div class="fb-banner-dot"></div>
+    <div class="fb-banner-text"><strong>Connecting to Firebase…</strong> — Establishing Firestore connection</div>
+    <div class="fb-banner-meta"></div>
+  </div>
+
   <div class="section-header">
     <div class="section-title">Command Centre</div>
     <div class="section-sub">${currentUser.access === 'plant' ? currentUser.plant + ' plant' : 'All plants'} · ${total} total records</div>
@@ -1038,6 +1177,7 @@ function renderDashboard(el) {
   </div>`;
 
   setTimeout(() => {
+    updateFbBanner(); // sync banner to current Firebase status
     const catColors = ['#e8c547','#4a90e2','#5abf7a','#e05555','#e08540','#9b59b6','#16a085','#e74c3c'];
     const critColors = { Critical:'#e05555', High:'#e08540', Medium:'#4a90e2', Low:'#5abf7a' };
     const statusColors = { Scheduled:'#4a90e2', Confirmed:'#e8c547', Completed:'#5abf7a', Cancelled:'#e05555' };
