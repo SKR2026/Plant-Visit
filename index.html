@@ -412,6 +412,70 @@ select.filter-sel:focus{outline:none;border-color:var(--gold-bdr)}
 .btn-ghost:hover:not(:disabled){background:var(--navy3);border-color:var(--border2)}
 .btn-danger{background:none;color:var(--red);border-color:rgba(224,85,85,.25)}
 .btn-danger:hover:not(:disabled){background:var(--red-bg)}
+/* ─── BULK DELETE ─────────────────────────────────────── */
+.bulk-bar{
+  display:none;align-items:center;gap:10px;flex-wrap:wrap;
+  background:linear-gradient(90deg,rgba(224,85,85,.13),rgba(224,85,85,.05));
+  border:1px solid rgba(224,85,85,.28);
+  border-radius:var(--radius);
+  padding:10px 14px;margin-bottom:10px;
+  animation:fadeIn .18s ease;
+}
+.bulk-bar.visible{display:flex}
+.bulk-bar-count{
+  font-size:13px;font-weight:600;color:var(--red);
+  display:flex;align-items:center;gap:6px;flex:1;min-width:120px;
+}
+.bulk-bar-count .bulk-num{
+  font-size:18px;font-weight:700;line-height:1;
+}
+.bulk-sel-all{
+  font-size:11px;color:var(--slate2);background:none;border:1px solid var(--border2);
+  padding:4px 11px;border-radius:20px;cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.bulk-sel-all:hover{background:var(--navy3);color:var(--white)}
+.bulk-desel{
+  font-size:11px;color:var(--slate);background:none;border:1px solid var(--border);
+  padding:4px 11px;border-radius:20px;cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.bulk-desel:hover{background:var(--navy3);color:var(--white2)}
+.btn-bulk-del{
+  background:var(--red);color:#fff;border:none;
+  padding:7px 18px;border-radius:var(--radius);font-size:12px;font-weight:700;
+  cursor:pointer;transition:all .15s;letter-spacing:.2px;white-space:nowrap;
+  display:flex;align-items:center;gap:6px;
+}
+.btn-bulk-del:hover{background:#c94444;transform:translateY(-1px);box-shadow:0 3px 10px rgba(224,85,85,.35)}
+.btn-bulk-del:active{transform:translateY(0)}
+.btn-bulk-del:disabled{opacity:.5;cursor:not-allowed;transform:none}
+/* Checkbox column */
+.chk-cell{width:36px;text-align:center;padding:0 4px !important;}
+.rec-checkbox{
+  width:15px;height:15px;cursor:pointer;accent-color:var(--red);
+  border-radius:3px;
+}
+/* Row selected highlight */
+tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
+/* Bulk delete summary list in confirm modal */
+.bulk-del-list{
+  max-height:220px;overflow-y:auto;margin:10px 0;
+  border:1px solid var(--border);border-radius:var(--radius);
+}
+.bulk-del-list-item{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 12px;border-bottom:1px solid var(--border);
+  font-size:12px;
+}
+.bulk-del-list-item:last-child{border-bottom:none}
+.bulk-del-dot{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+}
+.bulk-warn-box{
+  background:var(--red-bg);border:1px solid rgba(224,85,85,.25);
+  border-radius:var(--radius);padding:10px 14px;
+  font-size:12px;color:var(--red);margin-bottom:14px;
+  display:flex;align-items:flex-start;gap:8px;line-height:1.5;
+}
 .btn-blue{background:var(--blue-bg);color:var(--blue);border-color:rgba(74,144,226,.25)}
 .btn-blue:hover:not(:disabled){background:rgba(74,144,226,.2)}
 .btn-sm{padding:5px 12px;font-size:11px}
@@ -1049,6 +1113,8 @@ function showTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById('tab-'+tab);
   if (btn) btn.classList.add('active');
+  // Reset bulk selection state on every tab switch
+  if (typeof _bulkSelected !== 'undefined') _bulkSelected = new Set();
   destroyCharts();
   const el = document.getElementById('mainContent');
   el.innerHTML = '';
@@ -1243,6 +1309,7 @@ function buildLegend(id, keys, colors, vals=[]) {
    RECORDS
 ══════════════════════════════════════════════════════════ */
 let _visitsCache = [];
+let _bulkSelected = new Set(); // IDs currently checked for bulk-delete
 // renderRecords is defined below with filter support
 
 function filterRecords() {
@@ -1273,12 +1340,15 @@ function buildTable(visits, actions) {
   const isGuest = currentUser && currentUser.id === '__guest__';
   const canEdit = !isGuest && currentUser && (currentUser.access === 'admin' || currentUser.access === 'management' || currentUser.access === 'plant');
   const canDel  = !isGuest && currentUser && currentUser.access === 'admin';
+  const showChk = actions && canDel; // checkbox column: actions mode + admin only
   return `<table><thead><tr>
+    ${showChk ? `<th class="chk-cell"><input type="checkbox" class="rec-checkbox" id="chkAll" title="Select all visible" onchange="toggleSelectAll(this)"></th>` : ''}
     <th>Visit Date</th><th>Company</th><th>Representative</th>
     <th>Category</th><th>Criticality</th><th>Plant</th><th>Status</th><th>Stay</th>
     ${actions?'<th style="text-align:right">Actions</th>':''}
   </tr></thead><tbody>
-  ${visits.map(v=>`<tr>
+  ${visits.map(v=>`<tr id="row_${v.id}">
+    ${showChk ? `<td class="chk-cell"><input type="checkbox" class="rec-checkbox row-chk" data-id="${v.id}" onchange="onRowCheck(this)"></td>` : ''}
     <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${fmtDate(v.visitDate)}</td>
     <td><div class="td-company">${xe(v.company)}</div><div class="td-sub">${xe(v.focus)}</div></td>
     <td>${xe(v.rep)}</td>
@@ -1388,6 +1458,213 @@ function deleteVisit(id, company) {
   deleteOneVisit(id);
   updateBadges();
   toast('Deleted', company+' record removed.');
+  showTab('records');
+}
+
+/* ══════════════════════════════════════════════════════════
+   BULK DELETE — Super Admin only
+══════════════════════════════════════════════════════════ */
+
+/** Called when a row checkbox is toggled */
+function onRowCheck(cb) {
+  const id  = cb.dataset.id;
+  const row = document.getElementById('row_' + id);
+  if (cb.checked) {
+    _bulkSelected.add(id);
+    if (row) row.classList.add('bulk-selected');
+  } else {
+    _bulkSelected.delete(id);
+    if (row) row.classList.remove('bulk-selected');
+  }
+  syncBulkBar();
+  // Update "Select All" header checkbox state
+  const all  = document.querySelectorAll('.row-chk');
+  const chkd = document.querySelectorAll('.row-chk:checked');
+  const hdr  = document.getElementById('chkAll');
+  if (hdr) {
+    hdr.indeterminate = chkd.length > 0 && chkd.length < all.length;
+    hdr.checked       = all.length > 0 && chkd.length === all.length;
+  }
+}
+
+/** Header "select all" checkbox — toggles every visible row */
+function toggleSelectAll(hdrCb) {
+  document.querySelectorAll('.row-chk').forEach(cb => {
+    cb.checked = hdrCb.checked;
+    const id  = cb.dataset.id;
+    const row = document.getElementById('row_' + id);
+    if (hdrCb.checked) {
+      _bulkSelected.add(id);
+      if (row) row.classList.add('bulk-selected');
+    } else {
+      _bulkSelected.delete(id);
+      if (row) row.classList.remove('bulk-selected');
+    }
+  });
+  syncBulkBar();
+}
+
+/** "Select all visible" button in bulk bar — selects every row in the current filtered view */
+function selectAllVisible() {
+  _bulkSelected = new Set();
+  document.querySelectorAll('.row-chk').forEach(cb => {
+    cb.checked = true;
+    _bulkSelected.add(cb.dataset.id);
+    const row = document.getElementById('row_' + cb.dataset.id);
+    if (row) row.classList.add('bulk-selected');
+  });
+  const hdr = document.getElementById('chkAll');
+  if (hdr) { hdr.checked = true; hdr.indeterminate = false; }
+  syncBulkBar();
+}
+
+/** "Clear" button — deselects everything */
+function clearSelection() {
+  _bulkSelected = new Set();
+  document.querySelectorAll('.row-chk').forEach(cb => {
+    cb.checked = false;
+    const row = document.getElementById('row_' + cb.dataset.id);
+    if (row) row.classList.remove('bulk-selected');
+  });
+  const hdr = document.getElementById('chkAll');
+  if (hdr) { hdr.checked = false; hdr.indeterminate = false; }
+  syncBulkBar();
+}
+
+/** Show/hide + update the bulk action bar */
+function syncBulkBar() {
+  const bar    = document.getElementById('bulkBar');
+  const count  = document.getElementById('bulkCount');
+  const plural = document.getElementById('bulkPlural');
+  const btn    = document.getElementById('btnBulkDel');
+  if (!bar) return;
+  const n = _bulkSelected.size;
+  if (n > 0) bar.classList.add('visible');
+  else       bar.classList.remove('visible');
+  if (count)  count.textContent  = n;
+  if (plural) plural.textContent = n === 1 ? '' : 's';
+  if (btn)    btn.disabled       = n === 0;
+}
+
+/** Also reset bulk state whenever filterRecords re-renders the table */
+const _origFilterRecords = filterRecords;
+filterRecords = function() {
+  _origFilterRecords();
+  // After the table re-renders, restore checkbox ticks and bar for still-visible IDs
+  restoreBulkCheckboxes();
+};
+
+function restoreBulkCheckboxes() {
+  document.querySelectorAll('.row-chk').forEach(cb => {
+    const id  = cb.dataset.id;
+    const row = document.getElementById('row_' + id);
+    if (_bulkSelected.has(id)) {
+      cb.checked = true;
+      if (row) row.classList.add('bulk-selected');
+    }
+  });
+  // Sync header checkbox
+  const all  = document.querySelectorAll('.row-chk');
+  const chkd = document.querySelectorAll('.row-chk:checked');
+  const hdr  = document.getElementById('chkAll');
+  if (hdr) {
+    hdr.indeterminate = chkd.length > 0 && chkd.length < all.length;
+    hdr.checked       = all.length > 0 && chkd.length === all.length;
+  }
+  syncBulkBar();
+}
+
+/**
+ * confirmBulkDelete()
+ * Shows a rich confirmation modal listing the selected records before deleting.
+ */
+function confirmBulkDelete() {
+  if (_bulkSelected.size === 0) return;
+  if (!(currentUser && currentUser.access === 'admin')) {
+    toast('Access Denied', 'Only Super Admins can bulk delete records.', true);
+    return;
+  }
+
+  const ids    = [..._bulkSelected];
+  const visits = ids.map(id => _visitsData.find(v => v.id === id)).filter(Boolean);
+  const n      = visits.length;
+
+  const CRIT_COLOR = { Critical:'var(--red)', High:'var(--orange)', Medium:'var(--gold)', Low:'var(--green)' };
+
+  const listRows = visits.map(v => `
+    <div class="bulk-del-list-item">
+      <div class="bulk-del-dot" style="background:${CRIT_COLOR[v.criticality]||'var(--slate)'}"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${xe(v.company)}</div>
+        <div style="color:var(--slate);font-size:11px">${v.plant} · ${fmtDate(v.visitDate)} · ${v.status}</div>
+      </div>
+      ${critBadge(v.criticality)}
+    </div>`).join('');
+
+  document.getElementById('modalBox').classList.add('modal-sm');
+  document.getElementById('modalTitle').innerHTML = `🗑 Bulk Delete — <span style="color:var(--red)">${n} Record${n===1?'':'s'}</span>`;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="bulk-warn-box">
+      <span style="font-size:16px;line-height:1">⚠️</span>
+      <div>
+        You are about to permanently delete <strong>${n} visit record${n===1?'':'s'}</strong>.
+        This action <strong>cannot be undone</strong> and will also remove the records from Firebase.
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--slate2);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.3px">
+      Records to be deleted:
+    </div>
+    <div class="bulk-del-list">${listRows}</div>
+    <div style="font-size:11px;color:var(--slate);margin-bottom:18px;margin-top:6px">
+      Type <strong style="color:var(--red)">DELETE</strong> to confirm.
+    </div>
+    <div class="fg" style="margin-bottom:14px">
+      <input type="text" id="bulkDelConfirmInput"
+        placeholder='Type DELETE to confirm'
+        style="text-transform:uppercase;letter-spacing:.1em"
+        oninput="document.getElementById('btnConfirmBulkDel').disabled = this.value.trim().toUpperCase() !== 'DELETE'">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-danger" id="btnConfirmBulkDel" disabled
+        onclick="executeBulkDelete()" style="font-weight:700">
+        🗑 Delete ${n} Record${n===1?'':'s'}
+      </button>
+    </div>`;
+  document.getElementById('overlay').classList.add('open');
+  // Focus the confirmation input
+  setTimeout(() => document.getElementById('bulkDelConfirmInput')?.focus(), 80);
+}
+
+/**
+ * executeBulkDelete()
+ * Performs the actual deletion of all selected IDs from memory + Firestore.
+ */
+async function executeBulkDelete() {
+  const ids = [..._bulkSelected];
+  if (!ids.length) return;
+
+  const btn = document.getElementById('btnConfirmBulkDel');
+  if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+
+  // Delete from in-memory store + Firestore (fire-and-forget batched)
+  const batch = db.batch();
+  ids.forEach(id => {
+    _visitsData = _visitsData.filter(v => v.id !== id);
+    batch.delete(db.collection(VISITS_COL).doc(id));
+  });
+  try {
+    await batch.commit();
+  } catch(e) {
+    console.error('Bulk delete Firestore error:', e);
+    // Still continue — in-memory is already updated
+  }
+
+  closeModal();
+  _bulkSelected = new Set();
+  updateBadges();
+  toast(`🗑 ${ids.length} Record${ids.length===1?'':'s'} Deleted`,
+        `Bulk delete by ${currentUser.name} — ${ids.length} visit${ids.length===1?'':'s'} removed permanently.`);
   showTab('records');
 }
 
@@ -2595,6 +2872,7 @@ function renderRecords(el) {
   _visitsCache = getVisible();
   const pf = _pendingFilter || {};
   _pendingFilter = null;
+  const isAdmin = currentUser && currentUser.access === 'admin';
   el.innerHTML = `
   ${currentUser.access==='plant'?`<div class="alert alert-info">ℹ Showing records for <strong>${currentUser.plant}</strong> plant only.</div>`:''}
   <div class="filters">
@@ -2609,8 +2887,19 @@ function renderRecords(el) {
     </select>
     ${currentUser.access!=='plant'?`<select class="filter-sel" id="fPlant" onchange="filterRecords()"><option value="">All Plants</option>${PLANTS.map(p=>`<option${pf.plant===p?' selected':''}>${p}</option>`).join('')}</select>`:''}
     <button class="btn btn-gold btn-sm" onclick="showTab('new')">+ New Visit</button>
-    ${currentUser.access==='admin'?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
+    ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
   </div>
+  ${isAdmin ? `
+  <div class="bulk-bar" id="bulkBar">
+    <div class="bulk-bar-count">
+      <span class="bulk-num" id="bulkCount">0</span> record<span id="bulkPlural">s</span> selected
+    </div>
+    <button class="bulk-sel-all" onclick="selectAllVisible()" title="Select all currently visible rows">Select all visible</button>
+    <button class="bulk-desel" onclick="clearSelection()" title="Clear all selections">Clear</button>
+    <button class="btn-bulk-del" id="btnBulkDel" onclick="confirmBulkDelete()">
+      🗑 Delete Selected
+    </button>
+  </div>` : ''}
   <div class="table-wrap" id="recTable"></div>`;
   // Apply filter immediately if pre-set
   if (pf.crit || pf.status || pf.plant) {
