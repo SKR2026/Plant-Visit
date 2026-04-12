@@ -1359,7 +1359,7 @@ function filterRecords() {
   const stat = document.getElementById('fStatus')?.value||'';
   const plt  = document.getElementById('fPlant')?.value||'';
   const f = _visitsCache.filter(v => {
-    const txt = (v.company+v.rep+v.focus+v.agenda+v.coordinator+v.attendees).toLowerCase();
+    const txt = (v.company+v.rep+v.focus+v.agenda+v.coordinator+v.attendees+(v.visitDate||'')+(v.visitDateEnd||'')).toLowerCase();
     return (!q||txt.includes(q))&&(!crit||v.criticality===crit)&&(!stat||v.status===stat)&&(!plt||v.plant===plt);
   });
   document.getElementById('recTable').innerHTML = buildTable(f, true);
@@ -1384,13 +1384,14 @@ function buildTable(visits, actions) {
   const showChk = actions && canDel; // checkbox column: actions mode + admin only
   return `<table><thead><tr>
     ${showChk ? `<th class="chk-cell"><input type="checkbox" class="rec-checkbox" id="chkAll" title="Select all visible" onchange="toggleSelectAll(this)"></th>` : ''}
-    <th>Visit Date</th><th>Company</th><th>Representative</th>
+    <th>Visit Date</th><th>Dur.</th><th>Company</th><th>Representative</th>
     <th>Category</th><th>Criticality</th><th>Plant</th><th>Status</th><th>Stay</th>
     ${actions?'<th style="text-align:right">Actions</th>':''}
   </tr></thead><tbody>
   ${visits.map(v=>`<tr id="row_${v.id}">
     ${showChk ? `<td class="chk-cell"><input type="checkbox" class="rec-checkbox row-chk" data-id="${v.id}" onchange="onRowCheck(this)"></td>` : ''}
-    <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${fmtDate(v.visitDate)}</td>
+    <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${fmtDate(v.visitDate)}${v.visitDateEnd&&v.visitDateEnd!==v.visitDate?`<span style="font-size:10px;color:var(--slate);display:block">→ ${fmtDate(v.visitDateEnd)}</span>`:''}</td>
+    <td style="font-size:11px;color:var(--slate);white-space:nowrap">${(v.visitDateEnd&&v.visitDateEnd!==v.visitDate)?(Math.round((new Date(v.visitDateEnd)-new Date(v.visitDate))/86400000)+1)+'d':'1d'}</td>
     <td><div class="td-company">${xe(v.company)}</div><div class="td-sub">${xe(v.focus)}</div></td>
     <td>${xe(v.rep)}</td>
     <td><span class="badge badge-gold">${xe(v.category)}</span></td>
@@ -1417,10 +1418,11 @@ function renderForm(el, data) {
   el.innerHTML = `
   <div class="form-panel">
     <div class="form-panel-title">${isEdit?'Edit Visit Record':'New Customer Visit'}<span>${isEdit?'Updating · '+xe(d.company):'Entry Form'}</span></div>
-    <div class="form-grid g3">
+    <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
       <div class="form-section-label">Core Details</div>
       <div class="fg"><label>Confirmation Date <span class="req">*</span></label><input type="date" id="f_confirmDate" value="${d.confirmDate||''}"></div>
-      <div class="fg"><label>Visit Date <span class="req">*</span></label><input type="date" id="f_visitDate" value="${d.visitDate||''}"></div>
+      <div class="fg"><label>Visit Date — From <span class="req">*</span></label><input type="date" id="f_visitDate" value="${d.visitDate||''}" onchange="validateVisitDateRange()"></div>
+      <div class="fg"><label>Visit Date — To <span style="font-size:10px;color:var(--slate);font-weight:400">(optional, multi-day)</span></label><input type="date" id="f_visitDateEnd" value="${d.visitDateEnd||''}" onchange="validateVisitDateRange()"></div>
       <div class="fg"><label>Plant <span class="req">*</span></label><select id="f_plant" ${plantDisabled}>${PLANTS.map(p=>`<option${d.plant===p?' selected':''}>${p}</option>`).join('')}</select></div>
     </div>
     <div class="form-grid" style="margin-top:16px">
@@ -1470,7 +1472,9 @@ function collectForm() {
   for (const id of req) {
     if (!v(id).trim()) { toast('Validation Error','Please fill all required (*) fields.',true); document.getElementById(id)?.focus(); return null; }
   }
-  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
+  const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
+  if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
+  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
 }
 
 function saveVisit(editId) {
@@ -1637,7 +1641,7 @@ function confirmBulkDelete() {
       <div class="bulk-del-dot" style="background:${CRIT_COLOR[v.criticality]||'var(--slate)'}"></div>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${xe(v.company)}</div>
-        <div style="color:var(--slate);font-size:11px">${v.plant} · ${fmtDate(v.visitDate)} · ${v.status}</div>
+        <div style="color:var(--slate);font-size:11px">${v.plant} · ${fmtDateRange(v.visitDate, v.visitDateEnd)} · ${v.status}</div>
       </div>
       ${critBadge(v.criticality)}
     </div>`).join('');
@@ -1721,7 +1725,7 @@ function openView(id) {
   document.getElementById('modalBody').innerHTML = `
     <div class="detail-grid">
       <div class="detail-item"><div class="detail-label">Confirmation Date</div><div class="detail-value em">${fmtDate(v.confirmDate)}</div></div>
-      <div class="detail-item"><div class="detail-label">Visit Date</div><div class="detail-value em">${fmtDate(v.visitDate)}</div></div>
+      <div class="detail-item"><div class="detail-label">Visit Date</div><div class="detail-value em">${fmtDateRange(v.visitDate, v.visitDateEnd)}</div></div>
       <div class="detail-item"><div class="detail-label">Plant</div><div class="detail-value em">${v.plant}</div></div>
       <div class="detail-item"><div class="detail-label">Representative</div><div class="detail-value">${xe(v.rep)}</div></div>
       <div class="detail-item"><div class="detail-label">Category</div><div class="detail-value"><span class="badge badge-gold">${xe(v.category)}</span></div></div>
@@ -1752,6 +1756,8 @@ function openEdit(id) {
   document.getElementById('modalBody').innerHTML = tmp.innerHTML;
   document.getElementById('overlay').classList.add('open');
   document.getElementById('hotelWrap').style.display = v.stay==='Y'?'block':'none';
+  const _eEl=document.getElementById('f_visitDateEnd'); if(_eEl&&v.visitDateEnd) _eEl.value=v.visitDateEnd;
+  validateVisitDateRange();
   document.getElementById('saveBtn').onclick = () => { closeModal(); saveVisitFromModal(id); };
   document.querySelectorAll('#modalBody .btn-ghost')[0].onclick = closeModal;
 }
@@ -1885,7 +1891,7 @@ function logMail(record, isUpdate) {
   const appUrl  = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
   const directLink = `${appUrl}?visit=${record.id}`;
   const company = _settingsData?.app?.companyName || 'PlantVisit';
-  const subject = `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${fmtDate(record.visitDate)}`;
+  const subject = `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${fmtDateRange(record.visitDate, record.visitDateEnd)}`;
   const az      = _settingsData.azure || {};
   const toAddr  = az.msToEmail || _settingsData.notification?.managementEmail || 'management@company.com';
 
@@ -1941,7 +1947,7 @@ function logMail(record, isUpdate) {
           ${record.company}
         </div>
         <div style="font-family:'Times New Roman',Times,serif;font-size:14px;color:#aaaac8;margin-top:6px;">
-          ${record.plant} Plant &nbsp;·&nbsp; ${fmtDate(record.visitDate)}
+          ${record.plant} Plant &nbsp;·&nbsp; ${fmtDateRange(record.visitDate, record.visitDateEnd)}
         </div>
       </div>
     </td>
@@ -1988,7 +1994,7 @@ function logMail(record, isUpdate) {
       ${[
         ['🏢','Company',     record.company],
         ['🏭','Plant',       record.plant],
-        ['📅','Visit Date',  fmtDate(record.visitDate)],
+        ['📅','Visit Date',  fmtDateRange(record.visitDate, record.visitDateEnd)],
         ['📬','Confirm Date',fmtDate(record.confirmDate) || '—'],
         ['👤','Rep / Guest', record.rep || '—'],
         ['📋','Category',    record.category],
@@ -2421,7 +2427,7 @@ function buildDailyDigestHtml(visits, since, company) {
       <td style="padding:14px 16px;vertical-align:top;width:36px;font-size:20px">🏢</td>
       <td style="padding:14px 8px 14px 0;vertical-align:top">
         <div style="font-family:'Times New Roman',Times,serif;font-size:15px;font-weight:700;color:#0f0f1a;line-height:1.3">${xe(v.company)}</div>
-        <div style="font-size:12px;color:#6b6b88;margin-top:3px">${xe(v.plant)} &nbsp;·&nbsp; ${fmtDate(v.visitDate)}</div>
+        <div style="font-size:12px;color:#6b6b88;margin-top:3px">${xe(v.plant)} &nbsp;·&nbsp; ${fmtDateRange(v.visitDate, v.visitDateEnd)}</div>
         <div style="font-size:12px;color:#9b72e8;margin-top:4px">📋 ${xe(v.category)}</div>
       </td>
       <td style="padding:14px 8px;vertical-align:top;white-space:nowrap">
@@ -2854,8 +2860,8 @@ function deleteUser(id, name) {
 ══════════════════════════════════════════════════════════ */
 function exportCSV() {
   const visits = getVisible();
-  const headers = ['ID','Confirm Date','Visit Date','Plant','Company','Representative','Category','Criticality','Focus Area','Agenda','Coordinator','Attendees','Stay','Hotel','Remarks','Status','Created At'];
-  const rows = visits.map(v => [v.id,v.confirmDate,v.visitDate,v.plant,v.company,v.rep,v.category,v.criticality,v.focus,v.agenda,v.coordinator,v.attendees,v.stay,v.hotel||'',v.remarks||'',v.status,v.createdAt||''].map(c=>`"${String(c).replace(/"/g,'""')}"`).join(','));
+  const headers = ['ID','Confirm Date','Visit Date From','Visit Date To','Duration (days)','Plant','Company','Representative','Category','Criticality','Focus Area','Agenda','Coordinator','Attendees','Stay','Hotel','Remarks','Status','Created At'];
+  const rows = visits.map(v => { const _d=(v.visitDateEnd&&v.visitDateEnd!==v.visitDate)?Math.round((new Date(v.visitDateEnd)-new Date(v.visitDate))/86400000)+1:1; return [v.id,v.confirmDate,v.visitDate,v.visitDateEnd||v.visitDate,_d,v.plant,v.company,v.rep,v.category,v.criticality,v.focus,v.agenda,v.coordinator,v.attendees,v.stay,v.hotel||'',v.remarks||'',v.status,v.createdAt||''].map(cv=>`"${String(cv).replace(/"/g,'""')}"`).join(','); });
   const csv = [headers.join(','),...rows].join('\n');
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
@@ -3251,7 +3257,7 @@ let _uploadSkip   = new Set(); // row indices manually excluded by admin
    coordinator, attendees, stay, hotel, remarks, agenda
 */
 const UPLOAD_COLS = [
-  'confirm_date','visit_date','plant','company','rep',
+  'confirm_date','visit_date','visit_date_end','plant','company','rep',
   'category','criticality','focus','status',
   'coordinator','attendees','stay','hotel','remarks','agenda'
 ];
@@ -3338,7 +3344,7 @@ function renderUploadPhase1() {
         <span><strong>status:</strong> ${STATUSES.map(s=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${s}</code>`).join(' ')}</span>
         <span><strong>stay:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">Y</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">N</code></span>
         <span><strong>category:</strong> ${CATEGORIES.slice(0,4).map(c=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${c}</code>`).join(' ')} …</span>
-        <span><strong>dates:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">YYYY-MM-DD</code></span>
+        <span><strong>dates:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">YYYY-MM-DD</code> — visit_date_end optional, blank = single-day</span>
       </div>
     </div>
   </div>`;
@@ -3377,7 +3383,7 @@ function renderUploadPhase2() {
       <td style="color:var(--slate);font-size:10px">${r._idx+1}</td>
       <td>${statusCell}${errCell?`<div style="margin-top:3px">${errCell}</div>`:''}</td>
       <td style="white-space:nowrap">${xe(r.confirm_date||'')}</td>
-      <td style="white-space:nowrap">${xe(r.visit_date||'')}</td>
+      <td style="white-space:nowrap">${xe(r.visit_date||'')}${r.visit_date_end?`<span style="color:var(--slate);font-size:10px;display:block">→ ${xe(r.visit_date_end)}</span>`:''}</td>
       <td>${xe(r.plant||'')}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${xe(r.company||'')}">${xe(r.company||'')}</td>
       <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${xe(r.rep||'')}</td>
@@ -3571,7 +3577,8 @@ function parseUploadCSV(text) {
       _valid:       true,
       _errors:      [],
       confirm_date: get('confirm_date'),
-      visit_date:   get('visit_date'),
+      visit_date:     get('visit_date'),
+      visit_date_end: get('visit_date_end') || '',
       plant:        get('plant'),
       company:      get('company'),
       rep:          get('rep'),
@@ -3601,6 +3608,10 @@ function parseUploadCSV(text) {
       errs.push('confirm_date must be YYYY-MM-DD');
     if (row.visit_date && !dateRe.test(row.visit_date))
       errs.push('visit_date must be YYYY-MM-DD');
+    if (row.visit_date_end && !dateRe.test(row.visit_date_end))
+      errs.push('visit_date_end must be YYYY-MM-DD');
+    if (row.visit_date && row.visit_date_end && row.visit_date_end < row.visit_date)
+      errs.push('visit_date_end cannot be before visit_date');
 
     // Plant must be in PLANTS list
     if (row.plant && !PLANTS.includes(row.plant))
@@ -3733,7 +3744,8 @@ async function executeUploadImport() {
   const newVisits = toImport.map(r => ({
     id:          'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     confirmDate: r.confirm_date,
-    visitDate:   r.visit_date,
+    visitDate:    r.visit_date,
+    visitDateEnd: r.visit_date_end || '',
     plant:       r.plant,
     company:     r.company.trim(),
     rep:         r.rep.trim(),
@@ -3784,6 +3796,7 @@ function downloadUploadTemplate() {
   const example = [
     '2024-04-10',           // confirm_date
     '2024-04-18',           // visit_date
+    '2024-04-19',           // visit_date_end  (leave blank for single-day)
     PLANTS[0],              // plant
     'Tata Steel Ltd',       // company
     'Mr. Suresh Patel',     // rep
