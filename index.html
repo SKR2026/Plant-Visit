@@ -573,6 +573,44 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 @media(max-width:900px){.metric-grid,.metric-grid-5{grid-template-columns:1fr 1fr}.chart-grid,.chart-grid.three{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr 1fr}.plant-stats-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.metric-grid,.metric-grid-5{grid-template-columns:1fr 1fr}.form-grid,.form-grid.g3,.form-grid.g4{grid-template-columns:1fr}.content{padding:16px}.header{padding:0 16px;gap:8px}.logo-sub,.user-name-block{display:none}.detail-grid{grid-template-columns:1fr}.chart-grid{grid-template-columns:1fr}.settings-input{width:180px}}
 @media print{.header,.nav,.filters,.btn,.form-panel{display:none!important}body{background:white!important;color:black!important}}
+/* ─── BULK UPLOAD ─────────────────────────────────────── */
+.upload-hero{border:2px dashed var(--border2);border-radius:var(--radius-lg);padding:48px 24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--navy2)}
+.upload-hero:hover,.upload-hero.drag-over{border-color:var(--gold);background:var(--gold-bg)}
+.upload-hero-icon{font-size:40px;margin-bottom:12px;line-height:1}
+.upload-hero-title{font-size:16px;font-weight:600;color:var(--white);margin-bottom:6px}
+.upload-hero-sub{font-size:12px;color:var(--slate);line-height:1.6}
+.upload-hero input[type=file]{display:none}
+.upload-steps{display:flex;gap:0;margin-bottom:24px}
+.upload-step{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;position:relative}
+.upload-step:not(:last-child)::after{content:'';position:absolute;right:0;top:50%;transform:translateY(-50%);width:1px;height:40px;background:var(--border)}
+.upload-step-num{width:26px;height:26px;border-radius:50%;background:var(--navy4);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--slate2)}
+.upload-step.active .upload-step-num{background:var(--gold);color:var(--navy);border-color:var(--gold)}
+.upload-step.done .upload-step-num{background:var(--green-bg);color:var(--green);border-color:rgba(90,191,122,.3)}
+.upload-step-label{font-size:11px;color:var(--slate);text-align:center}
+.upload-step.active .upload-step-label{color:var(--gold);font-weight:500}
+.upload-step.done .upload-step-label{color:var(--green)}
+.preview-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+.preview-table{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}
+.preview-table th{padding:9px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--slate);background:var(--navy3);border-bottom:1px solid var(--border);white-space:nowrap}
+.preview-table td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--white2);vertical-align:middle}
+.preview-table tr:last-child td{border-bottom:none}
+.preview-table tr.row-ok:hover td{background:rgba(90,191,122,.04)}
+.preview-table tr.row-err td{background:rgba(224,85,85,.06)}
+.preview-table tr.row-err:hover td{background:rgba(224,85,85,.10)}
+.preview-table tr.row-skip td{opacity:.45}
+.row-status-ok{color:var(--green);font-size:11px;font-weight:700;white-space:nowrap}
+.row-status-err{color:var(--red);font-size:11px;font-weight:700;white-space:nowrap}
+.row-status-skip{color:var(--slate);font-size:11px;white-space:nowrap}
+.err-tooltip{display:inline-block;background:var(--red-bg);color:var(--red);border:1px solid rgba(224,85,85,.25);border-radius:4px;padding:2px 7px;font-size:10px;cursor:default;max-width:260px;white-space:normal;line-height:1.4}
+.import-summary{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.import-stat{flex:1;min-width:110px;background:var(--navy3);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;text-align:center}
+.import-stat-num{font-size:22px;font-weight:700;line-height:1;margin-bottom:3px}
+.import-stat-label{font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.4px}
+.upload-progress{height:4px;background:var(--navy3);border-radius:2px;margin-top:8px;overflow:hidden}
+.upload-progress-bar{height:100%;background:var(--gold);border-radius:2px;transition:width .3s ease;width:0%}
+.field-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.field-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;border:1px solid var(--border2);background:var(--navy3);color:var(--slate2)}
+.field-chip.required{border-color:rgba(232,197,71,.35);color:var(--gold);background:var(--gold-bg)}
 </style>
 </head>
 <body>
@@ -646,6 +684,7 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
     Mail Log <span class="nav-badge" id="mailBadge">0</span>
   </button>
   <button class="nav-btn" id="tab-settings" onclick="showTab('settings')" style="display:none">⚙ Settings</button>
+  <button class="nav-btn" id="tab-upload" onclick="showTab('upload')" style="display:none">📤 Bulk Upload</button>
 </nav>
 
 <!-- MAIN CONTENT -->
@@ -932,6 +971,7 @@ function activateSession(user, id, visitId) {
 
   // Tab visibility
   document.getElementById('tab-settings').style.display = currentUser.access === 'admin' ? '' : 'none';
+  document.getElementById('tab-upload').style.display  = currentUser.access === 'admin' ? '' : 'none';
   document.getElementById('tab-mail').style.display = currentUser.access === 'plant' ? 'none' : '';
 
   updateBadges();
@@ -1123,6 +1163,7 @@ function showTab(tab) {
   else if (tab === 'new')       renderForm(el, null);
   else if (tab === 'mail')      renderMail(el);
   else if (tab === 'settings')  renderSettings(el);
+  else if (tab === 'upload')    renderBulkUpload(el);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -3193,6 +3234,578 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('pageLoader').classList.add('hidden');
   }, 1200);
 });
+
+/* ══════════════════════════════════════════════════════════
+   BULK UPLOAD — Super Admin only
+   Phase 1: Upload CSV  →  Phase 2: Preview & Validate  →  Phase 3: Import
+══════════════════════════════════════════════════════════ */
+
+/* ── State ─────────────────────────────────────────────── */
+let _uploadRows   = [];   // parsed rows from CSV
+let _uploadPhase  = 1;    // 1=upload, 2=preview, 3=done
+let _uploadSkip   = new Set(); // row indices manually excluded by admin
+
+/* ── CSV Template column order ──────────────────────────
+   confirm_date, visit_date, plant, company, rep,
+   category, criticality, focus, status,
+   coordinator, attendees, stay, hotel, remarks, agenda
+*/
+const UPLOAD_COLS = [
+  'confirm_date','visit_date','plant','company','rep',
+  'category','criticality','focus','status',
+  'coordinator','attendees','stay','hotel','remarks','agenda'
+];
+
+const UPLOAD_REQUIRED = ['confirm_date','visit_date','plant','company','rep','focus','coordinator','agenda'];
+
+/* ── Render entry point ──────────────────────────────── */
+function renderBulkUpload(el) {
+  if (currentUser.access !== 'admin') {
+    el.innerHTML = '<div class="alert alert-warn">⚠ Bulk Upload is only accessible to Super Admins.</div>';
+    return;
+  }
+  _uploadPhase = 1;
+  _uploadRows  = [];
+  _uploadSkip  = new Set();
+
+  el.innerHTML = `
+  <div class="section-header">
+    <div class="section-title">📤 Bulk Upload Visits</div>
+    <div class="section-sub">Import multiple visit records from a CSV file — Super Admin only</div>
+  </div>
+  <div id="uploadBody"></div>`;
+
+  renderUploadPhase1();
+}
+
+/* ─────────────────────────────────────────────────────────
+   PHASE 1 — File drop zone + template download
+───────────────────────────────────────────────────────── */
+function renderUploadPhase1() {
+  _uploadPhase = 1;
+  const el = document.getElementById('uploadBody');
+  if (!el) return;
+
+  el.innerHTML = `
+  <!-- Step indicator -->
+  <div class="card" style="padding:16px 20px 8px">
+    <div class="upload-steps">
+      <div class="upload-step active"><div class="upload-step-num">1</div><div class="upload-step-label">Upload CSV</div></div>
+      <div class="upload-step"><div class="upload-step-num">2</div><div class="upload-step-label">Preview &amp; Validate</div></div>
+      <div class="upload-step"><div class="upload-step-num">3</div><div class="upload-step-label">Import</div></div>
+    </div>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📂 Select or Drop a CSV File</div>
+      <button class="btn btn-ghost btn-sm" onclick="downloadUploadTemplate()">⬇ Download Template</button>
+    </div>
+
+    <div class="upload-hero" id="uploadDropZone"
+         onclick="document.getElementById('csvFileInput').click()"
+         ondragover="event.preventDefault();this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="handleUploadDrop(event)">
+      <input type="file" id="csvFileInput" accept=".csv,text/csv" onchange="handleUploadFile(this.files[0])">
+      <div class="upload-hero-icon">📄</div>
+      <div class="upload-hero-title">Drag &amp; drop your CSV here, or click to browse</div>
+      <div class="upload-hero-sub">
+        Accepts <strong>.csv</strong> files only &nbsp;·&nbsp; Max 2 000 rows<br>
+        First row must be the header row (column names)
+      </div>
+    </div>
+
+    <!-- Column reference -->
+    <div style="margin-top:20px">
+      <div style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">
+        Required columns <span style="color:var(--gold)">★</span> &nbsp;·&nbsp; Optional columns
+      </div>
+      <div class="field-chips">
+        ${UPLOAD_COLS.map(c => `<span class="field-chip${UPLOAD_REQUIRED.includes(c)?' required':''}">
+          ${UPLOAD_REQUIRED.includes(c)?'★ ':''}${c}
+        </span>`).join('')}
+      </div>
+    </div>
+
+    <!-- Accepted values reference -->
+    <div class="alert alert-info" style="margin-top:16px;flex-direction:column;align-items:flex-start;gap:6px">
+      <strong>Accepted values for key columns:</strong>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;margin-top:2px">
+        <span><strong>plant:</strong> ${PLANTS.map(p=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${p}</code>`).join(' ')}</span>
+        <span><strong>criticality:</strong> ${CRITS.map(c=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${c}</code>`).join(' ')}</span>
+        <span><strong>status:</strong> ${STATUSES.map(s=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${s}</code>`).join(' ')}</span>
+        <span><strong>stay:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">Y</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">N</code></span>
+        <span><strong>category:</strong> ${CATEGORIES.slice(0,4).map(c=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${c}</code>`).join(' ')} …</span>
+        <span><strong>dates:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">YYYY-MM-DD</code></span>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ─────────────────────────────────────────────────────────
+   PHASE 2 — Preview table with per-row validation
+───────────────────────────────────────────────────────── */
+function renderUploadPhase2() {
+  _uploadPhase = 2;
+  const el = document.getElementById('uploadBody');
+  if (!el) return;
+
+  const total   = _uploadRows.length;
+  const okRows  = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
+  const errRows = _uploadRows.filter(r => !r._valid);
+  const skipCnt = _uploadSkip.size;
+
+  const rows = _uploadRows.map(r => {
+    const isSkipped = _uploadSkip.has(r._idx);
+    const rowClass  = isSkipped ? 'row-skip' : r._valid ? 'row-ok' : 'row-err';
+    const statusCell = isSkipped
+      ? `<span class="row-status-skip">— Skipped</span>`
+      : r._valid
+        ? `<span class="row-status-ok">✓ Ready</span>`
+        : `<span class="row-status-err">✗ Error</span>`;
+    const errCell = r._errors.length
+      ? `<div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div>`
+      : '';
+    const toggleBtn = `<button onclick="toggleUploadRow(${r._idx})" title="${isSkipped?'Include this row':'Exclude this row'}"
+      style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">
+      ${isSkipped?'Include':'Skip'}
+    </button>`;
+
+    return `<tr class="${rowClass}">
+      <td style="color:var(--slate);font-size:10px">${r._idx+1}</td>
+      <td>${statusCell}${errCell?`<div style="margin-top:3px">${errCell}</div>`:''}</td>
+      <td style="white-space:nowrap">${xe(r.confirm_date||'')}</td>
+      <td style="white-space:nowrap">${xe(r.visit_date||'')}</td>
+      <td>${xe(r.plant||'')}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${xe(r.company||'')}">${xe(r.company||'')}</td>
+      <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${xe(r.rep||'')}</td>
+      <td>${xe(r.category||'')}</td>
+      <td>${r.criticality?critBadge(r.criticality):''}</td>
+      <td>${r.status?statusBadge(r.status):''}</td>
+      <td style="white-space:nowrap">${r.stay==='Y'?'<span class="badge badge-medium">Yes</span>':'No'}</td>
+      <td>${toggleBtn}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+  <!-- Step indicator -->
+  <div class="card" style="padding:16px 20px 8px">
+    <div class="upload-steps">
+      <div class="upload-step done"><div class="upload-step-num">✓</div><div class="upload-step-label">Upload CSV</div></div>
+      <div class="upload-step active"><div class="upload-step-num">2</div><div class="upload-step-label">Preview &amp; Validate</div></div>
+      <div class="upload-step"><div class="upload-step-num">3</div><div class="upload-step-label">Import</div></div>
+    </div>
+  </div>
+
+  <!-- Summary stats -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Preview — ${total} Row${total!==1?'s':''} Parsed</div>
+      <button class="btn btn-ghost btn-sm" onclick="renderUploadPhase1()">← Change File</button>
+    </div>
+    <div class="import-summary">
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--white)">${total}</div>
+        <div class="import-stat-label">Total Rows</div>
+      </div>
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--green)" id="upOkCount">${okRows.length}</div>
+        <div class="import-stat-label">Ready to Import</div>
+      </div>
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--red)">${errRows.length}</div>
+        <div class="import-stat-label">Validation Errors</div>
+      </div>
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--slate)" id="upSkipCount">${skipCnt}</div>
+        <div class="import-stat-label">Skipped</div>
+      </div>
+    </div>
+
+    ${errRows.length ? `<div class="alert alert-warn" style="margin-bottom:14px">
+      ⚠ <strong>${errRows.length} row${errRows.length>1?'s have':' has'} validation errors</strong> and will be excluded from import.
+      Fix the errors in your CSV and re-upload, or skip those rows.
+    </div>` : ''}
+
+    <!-- Preview table -->
+    <div class="preview-wrap" id="uploadPreviewTable">
+      <table class="preview-table">
+        <thead>
+          <tr>
+            <th>#</th><th>Status</th>
+            <th>Confirm Date</th><th>Visit Date</th><th>Plant</th>
+            <th>Company</th><th>Rep</th><th>Category</th>
+            <th>Criticality</th><th>Status</th><th>Stay</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="uploadTbody">${rows}</tbody>
+      </table>
+    </div>
+
+    <!-- Actions -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="selectAllUploadRows()">Include All</button>
+        <button class="btn btn-ghost btn-sm" onclick="skipAllErrRows()">Skip Errors Only</button>
+      </div>
+      <button class="btn btn-gold" id="btnDoImport" onclick="executeUploadImport()"
+        ${okRows.length===0?'disabled':''}>
+        ✦ Import <span id="btnImportCount">${okRows.length}</span> Record${okRows.length!==1?'s':''}
+      </button>
+    </div>
+  </div>`;
+}
+
+/* ─────────────────────────────────────────────────────────
+   PHASE 3 — Import result summary
+───────────────────────────────────────────────────────── */
+function renderUploadPhase3(imported, skipped, errors) {
+  _uploadPhase = 3;
+  const el = document.getElementById('uploadBody');
+  if (!el) return;
+  el.innerHTML = `
+  <!-- Step indicator -->
+  <div class="card" style="padding:16px 20px 8px">
+    <div class="upload-steps">
+      <div class="upload-step done"><div class="upload-step-num">✓</div><div class="upload-step-label">Upload CSV</div></div>
+      <div class="upload-step done"><div class="upload-step-num">✓</div><div class="upload-step-label">Preview &amp; Validate</div></div>
+      <div class="upload-step active"><div class="upload-step-num">3</div><div class="upload-step-label">Import</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🎉 Import Complete</div>
+    </div>
+    <div class="import-summary">
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--green)">${imported}</div>
+        <div class="import-stat-label">Imported</div>
+      </div>
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--slate)">${skipped}</div>
+        <div class="import-stat-label">Skipped</div>
+      </div>
+      <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--red)">${errors}</div>
+        <div class="import-stat-label">Errors</div>
+      </div>
+    </div>
+    <div class="alert alert-success" style="color:var(--green);background:var(--green-bg);border:1px solid rgba(90,191,122,.2);margin-bottom:16px">
+      ✅ <strong>${imported} visit record${imported!==1?'s':''}</strong> successfully imported and synced to Firebase Firestore.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-gold" onclick="showTab('records')">View Records →</button>
+      <button class="btn btn-ghost" onclick="renderBulkUpload(document.getElementById('mainContent'))">Upload Another File</button>
+    </div>
+  </div>`;
+}
+
+/* ─────────────────────────────────────────────────────────
+   FILE HANDLING
+───────────────────────────────────────────────────────── */
+function handleUploadDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadDropZone')?.classList.remove('drag-over');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) handleUploadFile(file);
+}
+
+function handleUploadFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv') {
+    toast('Invalid File', 'Please upload a .csv file.', true); return;
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    toast('File Too Large', 'CSV file must be under 4 MB.', true); return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    parseUploadCSV(text);
+  };
+  reader.onerror = () => toast('Read Error', 'Could not read the file.', true);
+  reader.readAsText(file, 'UTF-8');
+}
+
+/* ─────────────────────────────────────────────────────────
+   CSV PARSER + VALIDATOR
+───────────────────────────────────────────────────────── */
+function parseUploadCSV(text) {
+  // Normalize line endings
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(l => l.trim());
+  if (lines.length < 2) {
+    toast('Empty File', 'CSV has no data rows (need at least header + 1 data row).', true); return;
+  }
+  if (lines.length > 2001) {
+    toast('Too Many Rows', 'Max 2 000 data rows per upload.', true); return;
+  }
+
+  // Parse header
+  const header = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/\s+/g,'_'));
+
+  // Map header positions
+  const colIdx = {};
+  UPLOAD_COLS.forEach(col => { colIdx[col] = header.indexOf(col); });
+
+  // Check required columns exist in header
+  const missingCols = UPLOAD_REQUIRED.filter(c => colIdx[c] === -1);
+  if (missingCols.length) {
+    toast('Missing Columns', 'Required columns not found: ' + missingCols.join(', '), true);
+    return;
+  }
+
+  // Parse data rows
+  _uploadRows = [];
+  _uploadSkip = new Set();
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const cells = parseCSVLine(lines[i]);
+    const get   = col => colIdx[col] >= 0 ? (cells[colIdx[col]] || '').trim() : '';
+
+    const row = {
+      _idx:         _uploadRows.length,
+      _valid:       true,
+      _errors:      [],
+      confirm_date: get('confirm_date'),
+      visit_date:   get('visit_date'),
+      plant:        get('plant'),
+      company:      get('company'),
+      rep:          get('rep'),
+      category:     get('category') || CATEGORIES[0],
+      criticality:  get('criticality') || 'Medium',
+      focus:        get('focus'),
+      status:       get('status') || 'Scheduled',
+      coordinator:  get('coordinator'),
+      attendees:    get('attendees'),
+      stay:         (get('stay')||'N').toUpperCase() === 'Y' ? 'Y' : 'N',
+      hotel:        get('hotel'),
+      remarks:      get('remarks'),
+      agenda:       get('agenda'),
+    };
+
+    // ── Validation ────────────────────────────────────────
+    const errs = row._errors;
+
+    // Required fields
+    UPLOAD_REQUIRED.forEach(col => {
+      if (!row[col]) errs.push(`"${col}" is required`);
+    });
+
+    // Date format YYYY-MM-DD
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (row.confirm_date && !dateRe.test(row.confirm_date))
+      errs.push('confirm_date must be YYYY-MM-DD');
+    if (row.visit_date && !dateRe.test(row.visit_date))
+      errs.push('visit_date must be YYYY-MM-DD');
+
+    // Plant must be in PLANTS list
+    if (row.plant && !PLANTS.includes(row.plant))
+      errs.push(`plant "${row.plant}" not found — valid: ${PLANTS.join(', ')}`);
+
+    // Criticality
+    if (row.criticality && !CRITS.includes(row.criticality))
+      errs.push(`criticality must be one of: ${CRITS.join(', ')}`);
+
+    // Status
+    if (row.status && !STATUSES.includes(row.status))
+      errs.push(`status must be one of: ${STATUSES.join(', ')}`);
+
+    // Category — warn but don't block
+    if (row.category && !CATEGORIES.includes(row.category)) {
+      // Auto-assign to first category and add info note (not an error)
+      errs.push(`category "${row.category}" unknown — will use "${CATEGORIES[0]}"`);
+      row.category = CATEGORIES[0];
+    }
+
+    row._valid = errs.length === 0;
+    // Rows with only "category unknown" warning are still importable after correction
+    // We treat any error as blocking (simpler, safer)
+    _uploadRows.push(row);
+  }
+
+  if (_uploadRows.length === 0) {
+    toast('No Rows', 'No data rows found after parsing.', true); return;
+  }
+
+  renderUploadPhase2();
+}
+
+/* Minimal CSV line parser — handles quoted fields with commas/newlines */
+function parseCSVLine(line) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) {
+      result.push(cur); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+/* ─────────────────────────────────────────────────────────
+   ROW TOGGLE HELPERS
+───────────────────────────────────────────────────────── */
+function toggleUploadRow(idx) {
+  if (_uploadSkip.has(idx)) _uploadSkip.delete(idx);
+  else _uploadSkip.add(idx);
+  refreshUploadPreview();
+}
+
+function selectAllUploadRows() {
+  _uploadSkip = new Set();
+  refreshUploadPreview();
+}
+
+function skipAllErrRows() {
+  _uploadSkip = new Set();
+  _uploadRows.forEach(r => { if (!r._valid) _uploadSkip.add(r._idx); });
+  refreshUploadPreview();
+}
+
+function refreshUploadPreview() {
+  // Re-render just tbody + counts without full redraw
+  const tbody = document.getElementById('uploadTbody');
+  if (!tbody) { renderUploadPhase2(); return; }
+
+  let okCount = 0;
+  _uploadRows.forEach(r => {
+    const isSkipped = _uploadSkip.has(r._idx);
+    const tr = tbody.querySelector(`tr:nth-child(${r._idx+1})`);
+    if (!tr) return;
+
+    if (isSkipped) {
+      tr.className = 'row-skip';
+      tr.cells[1].innerHTML = '<span class="row-status-skip">— Skipped</span>';
+      tr.cells[tr.cells.length-1].innerHTML = `<button onclick="toggleUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">Include</button>`;
+    } else {
+      tr.className = r._valid ? 'row-ok' : 'row-err';
+      const statusHtml = r._valid ? '<span class="row-status-ok">✓ Ready</span>' : '<span class="row-status-err">✗ Error</span>';
+      const errHtml = r._errors.length ? `<div style="margin-top:3px"><div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div></div>` : '';
+      tr.cells[1].innerHTML = statusHtml + errHtml;
+      tr.cells[tr.cells.length-1].innerHTML = `<button onclick="toggleUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">Skip</button>`;
+      if (r._valid && !isSkipped) okCount++;
+    }
+  });
+
+  // Also count valid non-skipped
+  okCount = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx)).length;
+  const skipCount = _uploadSkip.size;
+
+  const okEl   = document.getElementById('upOkCount');
+  const skipEl = document.getElementById('upSkipCount');
+  const btnEl  = document.getElementById('btnDoImport');
+  const cntEl  = document.getElementById('btnImportCount');
+  if (okEl)   okEl.textContent   = okCount;
+  if (skipEl) skipEl.textContent = skipCount;
+  if (btnEl)  btnEl.disabled     = okCount === 0;
+  if (cntEl)  cntEl.textContent  = okCount;
+}
+
+/* ─────────────────────────────────────────────────────────
+   EXECUTE IMPORT
+───────────────────────────────────────────────────────── */
+async function executeUploadImport() {
+  const toImport = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
+  const skipped  = _uploadRows.filter(r => _uploadSkip.has(r._idx)).length;
+  const errors   = _uploadRows.filter(r => !r._valid).length;
+
+  if (!toImport.length) {
+    toast('Nothing to Import', 'No valid rows selected.', true); return;
+  }
+
+  // Disable button + show progress
+  const btn = document.getElementById('btnDoImport');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+
+  // Build visit objects
+  const now = new Date().toISOString();
+  const newVisits = toImport.map(r => ({
+    id:          'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    confirmDate: r.confirm_date,
+    visitDate:   r.visit_date,
+    plant:       r.plant,
+    company:     r.company.trim(),
+    rep:         r.rep.trim(),
+    category:    r.category,
+    criticality: r.criticality,
+    focus:       r.focus.trim(),
+    status:      r.status,
+    coordinator: r.coordinator.trim(),
+    attendees:   r.attendees.trim(),
+    stay:        r.stay,
+    hotel:       r.hotel.trim(),
+    remarks:     r.remarks.trim(),
+    agenda:      r.agenda.trim(),
+    createdAt:   now,
+    createdBy:   currentUser.id,
+    importedAt:  now,
+  }));
+
+  // Firestore batched write (max 500 per batch — split if needed)
+  const BATCH_SIZE = 400;
+  try {
+    for (let i = 0; i < newVisits.length; i += BATCH_SIZE) {
+      const chunk = newVisits.slice(i, i + BATCH_SIZE);
+      const batch = db.batch();
+      chunk.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
+      await batch.commit();
+      // Show progress
+      const pct = Math.round(Math.min(((i + chunk.length) / newVisits.length) * 100, 100));
+      if (btn) btn.textContent = `Importing… ${pct}%`;
+    }
+    // Merge into in-memory store
+    _visitsData = [..._visitsData, ...newVisits];
+    updateBadges();
+    renderUploadPhase3(toImport.length, skipped, errors);
+    toast(`✦ ${toImport.length} Records Imported`, `Bulk upload complete — ${toImport.length} visit${toImport.length!==1?'s':''} added.`);
+  } catch(e) {
+    console.error('Bulk import error:', e);
+    toast('Import Failed', e?.message || String(e), true);
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
+  }
+}
+
+/* ─────────────────────────────────────────────────────────
+   TEMPLATE DOWNLOAD
+───────────────────────────────────────────────────────── */
+function downloadUploadTemplate() {
+  const headers = UPLOAD_COLS.join(',');
+  const example = [
+    '2024-04-10',           // confirm_date
+    '2024-04-18',           // visit_date
+    PLANTS[0],              // plant
+    'Tata Steel Ltd',       // company
+    'Mr. Suresh Patel',     // rep
+    CATEGORIES[0],          // category
+    'High',                 // criticality
+    'New Order Discussion', // focus
+    'Scheduled',            // status
+    'Rajesh Kumar',         // coordinator
+    'Engineering Head, CFO',// attendees
+    'Y',                    // stay
+    'Marriott Pune',        // hotel
+    'VIP client',           // remarks
+    'Discuss Q2 supply requirements and annual pricing structure', // agenda
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+  const csv = headers + '\n' + example + '\n';
+  const a   = document.createElement('a');
+  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'plantvisit_bulk_upload_template.csv';
+  a.click();
+  toast('Template Downloaded', 'Fill in the CSV and upload it here.');
+}
+
 </script>
 </body>
 </html>
