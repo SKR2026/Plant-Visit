@@ -614,9 +614,10 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 .field-chip.required{border-color:rgba(232,197,71,.35);color:var(--gold);background:var(--gold-bg)}
 </style>
 <script>
-// Instantly hide login screen if this is a direct visit link — runs before DOM paints
+// Instantly hide login screen for any email link — runs before DOM paints
 (function(){
-  if (new URLSearchParams(window.location.search).get('visit')) {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('visit') || p.get('guest')) {
     document.documentElement.classList.add('guest-direct-link');
   }
 })();
@@ -894,11 +895,12 @@ let _pendingVisitId = null; // for direct-link navigation
 (function checkDirectLink() {
   const params  = new URLSearchParams(window.location.search);
   const visitId = params.get('visit');
-  if (!visitId) return;
-  _pendingVisitId = visitId;
-  // Run after DOM is ready — CSS has already hidden loginScreen & loader
+  const isGuest = params.get('guest');
+  if (!visitId && !isGuest) return;
+  if (visitId) _pendingVisitId = visitId;
+  // CSS has already hidden loginScreen & loader — run after DOM is ready
   document.addEventListener('DOMContentLoaded', () => {
-    autoLoginGuest(visitId);
+    autoLoginGuest(visitId || null);
   });
 })();
 
@@ -1048,9 +1050,8 @@ function autoLoginGuest(visitId) {
   // Activate session — this sets currentUser, updates header, shows app chrome
   activateSession(GUEST, '__guest__', visitId || null);
 
-  // Open the specific visit record once Firestore data is available
   if (visitId) {
-    // Show a loading shimmer in mainContent while data loads
+    // Specific visit requested — show spinner then open modal when data arrives
     const mc = document.getElementById('mainContent');
     if (mc && !mc.innerHTML.trim()) {
       mc.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px">
@@ -1061,21 +1062,18 @@ function autoLoginGuest(visitId) {
     const tryOpen = (attempts) => {
       const v = _visitsData.find(x => x.id === visitId);
       if (v) {
-        // Data ready — render records tab then open modal
         showTab('records');
         setTimeout(() => openView(visitId), 80);
       } else if (attempts > 0) {
-        // Not yet loaded — wait for Firebase snapshot
         setTimeout(() => tryOpen(attempts - 1), 300);
       } else {
-        // Give up — show records tab with toast
         showTab('records');
         toast('Record Not Found', 'This visit record could not be located.', true);
       }
     };
-    // Start trying immediately; Firebase snapshot usually arrives within 1–2s
-    tryOpen(20); // up to 6 seconds total (20 × 300ms)
+    tryOpen(20);
   }
+  // If no visitId (dashboard link) — activateSession already called showTab('dashboard')
 }
 
 function doLogin() {
@@ -1976,7 +1974,7 @@ async function sendGraphEmail(toEmail, subject, bodyHtml) {
 function logMail(record, isUpdate) {
   const logs    = loadMail();
   const appUrl  = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
-  const directLink = `${appUrl}?visit=${record.id}`;
+  const directLink = `${appUrl}?visit=${record.id}&guest=1`;
   const company = _settingsData?.app?.companyName || 'PlantVisit';
   const subject = `[${isUpdate?'UPDATED':'NEW'}] Customer Visit — ${record.company} @ ${record.plant} on ${fmtDateRange(record.visitDate, record.visitDateEnd)}`;
   const az      = _settingsData.azure || {};
@@ -2504,7 +2502,7 @@ function buildDailyDigestHtml(visits, since, company) {
   const visitRows = visits.map(v => {
     const critColor = CRIT_COLOR[v.criticality] || '#8888aa';
     const statColor = STAT_COLOR[v.status]      || '#8888aa';
-    const directLink = `${appUrl}?visit=${v.id}`;
+    const directLink = `${appUrl}?visit=${v.id}&guest=1`;
     const isNew = v.createdAt && new Date(v.createdAt) >= since;
     return `
     <tr>
@@ -2627,7 +2625,7 @@ function buildDailyDigestHtml(visits, since, company) {
       <table cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td style="border-radius:50px;background:#e8c547">
-            <a href="${appUrl}" style="display:inline-block;padding:13px 30px;font-size:14px;font-weight:700;color:#0f0f1a;text-decoration:none;border-radius:50px;letter-spacing:.3px">
+            <a href="${appUrl}?guest=1" style="display:inline-block;padding:13px 30px;font-size:14px;font-weight:700;color:#0f0f1a;text-decoration:none;border-radius:50px;letter-spacing:.3px">
               Open PlantVisit Dashboard →
             </a>
           </td>
