@@ -1511,9 +1511,7 @@ function collectForm() {
   }
   const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
   if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
-  const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
-  if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
-  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
+  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
 }
 
 function saveVisit(editId) {
