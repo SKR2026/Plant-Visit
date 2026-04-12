@@ -496,6 +496,7 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 .overlay.open{display:flex}
 .modal{background:var(--navy2);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:28px;width:min(820px,100%);max-height:90vh;overflow-y:auto;box-shadow:var(--shadow);animation:slideUp .2s ease}
 .modal-sm{width:min(480px,100%)}
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 .modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px}
 .modal-title{font-family:var(--font-display);font-size:20px;color:var(--white)}
@@ -611,6 +612,23 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 .field-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .field-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;border:1px solid var(--border2);background:var(--navy3);color:var(--slate2)}
 .field-chip.required{border-color:rgba(232,197,71,.35);color:var(--gold);background:var(--gold-bg)}
+</style>
+<script>
+// Instantly hide login screen if this is a direct visit link — runs before DOM paints
+(function(){
+  if (new URLSearchParams(window.location.search).get('visit')) {
+    document.documentElement.classList.add('guest-direct-link');
+  }
+})();
+</script>
+<style>
+/* Hide login screen instantly for direct visit links — no flash */
+html.guest-direct-link #loginScreen { display: none !important; }
+html.guest-direct-link #pageLoader  { display: none !important; }
+/* Show app chrome immediately for direct visit links */
+html.guest-direct-link #appHeader   { display: flex !important; }
+html.guest-direct-link #appNav      { display: flex !important; }
+html.guest-direct-link #mainContent { display: block !important; }
 </style>
 </head>
 <body>
@@ -876,20 +894,12 @@ let _pendingVisitId = null; // for direct-link navigation
 (function checkDirectLink() {
   const params  = new URLSearchParams(window.location.search);
   const visitId = params.get('visit');
-  if (visitId) {
-    _pendingVisitId = visitId;
-    document.addEventListener('DOMContentLoaded', () => {
-      // Show info banner + guest button on login screen (visible for a brief moment)
-      const info = document.getElementById('loginDirectInfo');
-      const wrap = document.getElementById('guestBtnWrap');
-      const btn  = document.getElementById('guestLoginBtn');
-      if (info) info.style.display = 'block';
-      if (wrap) wrap.style.display = 'block';
-      if (btn)  btn.textContent = '👁 Opening visit record…';
-      // Auto-login as guest immediately — no password or click needed
-      autoLoginGuest(visitId);
-    });
-  }
+  if (!visitId) return;
+  _pendingVisitId = visitId;
+  // Run after DOM is ready — CSS has already hidden loginScreen & loader
+  document.addEventListener('DOMContentLoaded', () => {
+    autoLoginGuest(visitId);
+  });
 })();
 
 /* ══════════════════════════════════════════════════════════
@@ -923,7 +933,7 @@ function initFirestoreListeners() {
     _visitsData = snapshot.docs.map(d => d.data());
     if (!_appReady) {
       if (_visitsData.length === 0) {
-        document.getElementById('loaderStatus').textContent = 'Seeding sample data…';
+        const _ls = document.getElementById('loaderStatus'); if (_ls) _ls.textContent = 'Seeding sample data…';
         const batch = db.batch();
         SEED_DATA.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
         batch.commit().then(() => { _visitsData = [...SEED_DATA]; bootApp(); }).catch(() => { _visitsData = [...SEED_DATA]; bootApp(); });
@@ -1003,7 +1013,7 @@ function activateSession(user, id, visitId) {
   // Tab visibility
   document.getElementById('tab-settings').style.display = currentUser.access === 'admin' ? '' : 'none';
   document.getElementById('tab-upload').style.display  = currentUser.access === 'admin' ? '' : 'none';
-  document.getElementById('tab-mail').style.display = currentUser.access === 'plant' ? 'none' : '';
+  document.getElementById('tab-mail').style.display = (currentUser.access === 'plant' || id === '__guest__') ? 'none' : '';
   document.getElementById('tab-new').style.display = (id === '__guest__') ? 'none' : '';
 
   // Guest-specific dropdown tweaks
@@ -1018,13 +1028,9 @@ function activateSession(user, id, visitId) {
   // Start daily-digest scheduler (fires at configured time once per day)
   startDailyDigestScheduler();
 
-  // Navigate — if a visitId was supplied, go to records tab (record opened by caller)
-  if (visitId) {
-    _pendingVisitId = null;
-    showTab('records');
-  } else {
-    showTab('dashboard');
-  }
+  // Navigate
+  _pendingVisitId = null;
+  showTab(visitId ? 'records' : 'dashboard');
 }
 
 /**
@@ -1039,23 +1045,36 @@ function autoLoginGuest(visitId) {
     access: 'management', plant: null, password: '', email: ''
   };
 
-  // Activate immediately — hide login screen right away, no password needed
+  // Activate session — this sets currentUser, updates header, shows app chrome
   activateSession(GUEST, '__guest__', visitId || null);
 
-  // If a specific visit was requested, wait for data then open it
+  // Open the specific visit record once Firestore data is available
   if (visitId) {
+    // Show a loading shimmer in mainContent while data loads
+    const mc = document.getElementById('mainContent');
+    if (mc && !mc.innerHTML.trim()) {
+      mc.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px">
+        <div style="width:40px;height:40px;border:3px solid var(--gold-bdr);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite"></div>
+        <div style="font-size:14px;color:var(--slate)">Loading visit record…</div>
+      </div>`;
+    }
     const tryOpen = (attempts) => {
       const v = _visitsData.find(x => x.id === visitId);
       if (v) {
-        openView(visitId);
+        // Data ready — render records tab then open modal
+        showTab('records');
+        setTimeout(() => openView(visitId), 80);
       } else if (attempts > 0) {
-        setTimeout(() => tryOpen(attempts - 1), 400);
+        // Not yet loaded — wait for Firebase snapshot
+        setTimeout(() => tryOpen(attempts - 1), 300);
       } else {
-        toast('Not Found', 'The linked visit record could not be found.', true);
+        // Give up — show records tab with toast
+        showTab('records');
+        toast('Record Not Found', 'This visit record could not be located.', true);
       }
     };
-    // Try immediately, then retry up to 15 times (6 seconds total)
-    setTimeout(() => tryOpen(15), 200);
+    // Start trying immediately; Firebase snapshot usually arrives within 1–2s
+    tryOpen(20); // up to 6 seconds total (20 × 300ms)
   }
 }
 
