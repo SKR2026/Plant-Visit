@@ -730,6 +730,12 @@ let _settingsData = {
     managementEmail: 'management@company.com',
     subjectPrefix: '[PlantVisit]'
   },
+  dailyDigest: {
+    enabled: false,
+    sendTime: '18:00',
+    recipients: '',
+    lastSentDate: ''
+  },
   app: {
     companyName: 'Company Ltd',
     appUrl: window.location.origin + window.location.pathname
@@ -819,6 +825,10 @@ function initFirestoreListeners() {
   SETTINGS_DOC.onSnapshot(doc => {
     if (doc.exists) {
       _settingsData = { ..._settingsData, ...doc.data() };
+      // Ensure dailyDigest sub-object is always fully merged
+      if (doc.data().dailyDigest) {
+        _settingsData.dailyDigest = { ..._settingsData.dailyDigest, ...doc.data().dailyDigest };
+      }
     }
   }, e => console.error(e));
 }
@@ -861,6 +871,9 @@ function activateSession(user, id, visitId) {
   document.getElementById('tab-mail').style.display = currentUser.access === 'plant' ? 'none' : '';
 
   updateBadges();
+
+  // Start daily-digest scheduler (fires at configured time once per day)
+  startDailyDigestScheduler();
 
   // Navigate — if a visitId was supplied, go straight to that record
   if (visitId) {
@@ -1938,6 +1951,7 @@ async function testGraphConnection() {
 
 function renderNotificationSettings(el) {
   const n = _settingsData.notification || {};
+  const d = _settingsData.dailyDigest   || {};
   el.innerHTML = `
   <div class="card">
     <div class="card-header"><div class="card-title">Email Notification Rules</div></div>
@@ -1973,6 +1987,68 @@ function renderNotificationSettings(el) {
         <div class="settings-row-right"><input type="text" class="settings-input" id="n_prefix" placeholder="[PlantVisit]" value="${xe(n.subjectPrefix||'')}"></div>
       </div>
     </div>
+
+    <!-- ═══ DAILY DIGEST ═══ -->
+    <div class="settings-section" style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px">
+      <div class="settings-section-title" style="display:flex;align-items:center;gap:10px">
+        📬 Consolidated Daily Digest
+        <span class="badge badge-medium" style="font-size:10px">Last 24 h Summary</span>
+      </div>
+      <div class="alert alert-info" style="margin:10px 0 16px;font-size:12px">
+        A single consolidated email is sent once a day at the scheduled time listing every visit
+        created or updated in the <strong>preceding 24 hours</strong>. Uses the same Microsoft
+        Graph API credentials configured in the <em>Graph API</em> tab.
+      </div>
+
+      <div class="settings-row">
+        <div><div class="settings-row-label">Enable Daily Digest</div><div class="settings-row-sub">Send one consolidated summary email per day</div></div>
+        <div class="settings-row-right">
+          <select class="settings-input" id="dd_enable" style="width:120px"
+            onchange="document.getElementById('dd_time_row').style.opacity=this.value==='true'?'1':'0.4'">
+            <option value="true"${d.enabled?' selected':''}>Enabled</option>
+            <option value="false"${!d.enabled?' selected':''}>Disabled</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-row" id="dd_time_row" style="opacity:${d.enabled?'1':'0.4'}">
+        <div>
+          <div class="settings-row-label">Scheduled Send Time</div>
+          <div class="settings-row-sub">Local time to dispatch the digest each day (24-hour format)</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="time" class="settings-input" id="dd_time"
+            value="${xe(d.sendTime||'18:00')}"
+            style="width:130px;font-size:14px;padding:8px 12px">
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Digest Recipients</div>
+          <div class="settings-row-sub">Comma-separated emails. Leave blank to use the Graph API recipient.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="text" class="settings-input" id="dd_recipients"
+            placeholder="gm@company.com, ops@company.com"
+            value="${xe(d.recipients||'')}">
+        </div>
+      </div>
+
+      ${d.lastSentDate ? `
+      <div class="settings-row" style="opacity:.7">
+        <div><div class="settings-row-label">Last Digest Sent</div></div>
+        <div class="settings-row-right" style="font-size:12px;color:var(--slate)">${xe(d.lastSentDate)}</div>
+      </div>` : ''}
+
+      <div id="dd_send_status" style="display:none;margin-bottom:12px"></div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
+        <button class="btn btn-ghost" onclick="sendDailyDigestEmail(true)">📬 Send Digest Now</button>
+      </div>
+    </div>
+    <!-- /DAILY DIGEST -->
+
     <div style="display:flex;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <button class="btn btn-gold" onclick="saveNotificationSettings()">✓ Save Notification Config</button>
     </div>
@@ -1986,8 +2062,305 @@ function saveNotificationSettings() {
     managementEmail:  document.getElementById('n_mgmt_email').value.trim(),
     subjectPrefix:    document.getElementById('n_prefix').value.trim(),
   };
+  _settingsData.dailyDigest = {
+    ..._settingsData.dailyDigest,
+    enabled:    document.getElementById('dd_enable').value === 'true',
+    sendTime:   document.getElementById('dd_time').value || '18:00',
+    recipients: document.getElementById('dd_recipients').value.trim(),
+  };
   saveSettings();
   toast('✓ Notification Config Saved', 'Email notification rules updated.');
+}
+
+/* ══════════════════════════════════════════════════════════
+   DAILY DIGEST — Consolidated 24-Hour Email
+══════════════════════════════════════════════════════════ */
+
+/**
+ * buildDailyDigestHtml(visits, since, company)
+ * Generates a branded consolidated HTML email for all visits
+ * created or updated in the last 24 hours.
+ */
+function buildDailyDigestHtml(visits, since, company) {
+  const appUrl    = _settingsData?.app?.appUrl || (window.location.origin + window.location.pathname);
+  const dateLabel = since.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+  const timeLabel = since.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });
+  const nowLabel  = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true });
+
+  const CRIT_COLOR = { Critical:'#e05555', High:'#e08540', Medium:'#e8c547', Low:'#5abf7a' };
+  const STAT_COLOR = { Confirmed:'#4a90e2', Completed:'#5abf7a', Scheduled:'#9b72e8', Cancelled:'#e05555' };
+
+  const visitRows = visits.map(v => {
+    const critColor = CRIT_COLOR[v.criticality] || '#8888aa';
+    const statColor = STAT_COLOR[v.status]      || '#8888aa';
+    const directLink = `${appUrl}?visit=${v.id}`;
+    const isNew = v.createdAt && new Date(v.createdAt) >= since;
+    return `
+    <tr>
+      <td colspan="5" style="padding:0"><div style="height:1px;background:#e8e8f0"></div></td>
+    </tr>
+    <tr style="background:#fafafe">
+      <td style="padding:14px 16px;vertical-align:top;width:36px;font-size:20px">🏢</td>
+      <td style="padding:14px 8px 14px 0;vertical-align:top">
+        <div style="font-family:'Times New Roman',Times,serif;font-size:15px;font-weight:700;color:#0f0f1a;line-height:1.3">${xe(v.company)}</div>
+        <div style="font-size:12px;color:#6b6b88;margin-top:3px">${xe(v.plant)} &nbsp;·&nbsp; ${fmtDate(v.visitDate)}</div>
+        <div style="font-size:12px;color:#9b72e8;margin-top:4px">📋 ${xe(v.category)}</div>
+      </td>
+      <td style="padding:14px 8px;vertical-align:top;white-space:nowrap">
+        <span style="display:inline-block;background:${critColor}22;color:${critColor};border:1px solid ${critColor}55;border-radius:50px;padding:3px 11px;font-size:11px;font-weight:700">${xe(v.criticality)}</span>
+      </td>
+      <td style="padding:14px 8px;vertical-align:top;white-space:nowrap">
+        <span style="display:inline-block;background:${statColor}22;color:${statColor};border:1px solid ${statColor}55;border-radius:50px;padding:3px 11px;font-size:11px;font-weight:700">${xe(v.status)}</span>
+      </td>
+      <td style="padding:14px 16px 14px 8px;vertical-align:top;text-align:right;white-space:nowrap">
+        <span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:3px 10px;border-radius:50px;background:${isNew?'rgba(90,191,122,.12)':'rgba(224,133,64,.12)'};color:${isNew?'#5abf7a':'#e08540'};border:1px solid ${isNew?'rgba(90,191,122,.3)':'rgba(224,133,64,.3)'}">
+          ${isNew ? '✦ New' : '✏ Updated'}
+        </span><br>
+        <a href="${directLink}" style="font-size:11px;color:#4a90e2;text-decoration:none;margin-top:6px;display:inline-block">View →</a>
+      </td>
+    </tr>
+    ${v.agenda ? `
+    <tr style="background:#f4f4fb">
+      <td style="padding:0 16px 12px 16px" colspan="1"></td>
+      <td colspan="4" style="padding:0 16px 12px 0;font-size:12px;color:#5a5a78;font-style:italic;line-height:1.5">
+        📝 ${xe(v.agenda.length > 180 ? v.agenda.slice(0, 180) + '…' : v.agenda)}
+      </td>
+    </tr>` : ''}`;
+  }).join('');
+
+  // Summary stats
+  const byPlant = {};
+  visits.forEach(v => { byPlant[v.plant] = (byPlant[v.plant] || 0) + 1; });
+  const plantSummary = Object.entries(byPlant).map(([p, c]) => `<strong>${xe(p)}</strong> (${c})`).join('&nbsp;&nbsp;·&nbsp;&nbsp;');
+
+  const critCount = { Critical:0, High:0, Medium:0, Low:0 };
+  visits.forEach(v => { if (critCount[v.criticality] !== undefined) critCount[v.criticality]++; });
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlantVisit Daily Digest — ${dateLabel}</title></head>
+<body style="margin:0;padding:0;background:#f0f0f8;font-family:'Times New Roman',Times,serif;font-size:14px;">
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f0f8;padding:32px 0;">
+<tr><td align="center">
+
+<table width="640" cellpadding="0" cellspacing="0" border="0"
+  style="max-width:640px;width:100%;background:#ffffff;border-radius:24px;
+         box-shadow:0 8px 40px rgba(0,0,0,0.10);overflow:hidden;">
+
+  <!-- Header -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#0f0f1a 0%,#1e1e38 100%);padding:36px 40px 24px;border-radius:24px 24px 0 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td>
+            <div style="font-size:12px;color:#8888aa;letter-spacing:1.2px;text-transform:uppercase">PlantVisit · ${xe(company)}</div>
+          </td>
+          <td align="right">
+            <span style="background:rgba(232,197,71,.15);color:#e8c547;border:1px solid rgba(232,197,71,.4);border-radius:50px;padding:5px 15px;font-size:12px;font-weight:700;letter-spacing:.3px">
+              📬 Daily Digest
+            </span>
+          </td>
+        </tr>
+      </table>
+      <div style="margin-top:20px">
+        <div style="font-size:26px;font-weight:700;color:#e8c547;line-height:1.2;letter-spacing:-.5px">
+          ${visits.length} Visit${visits.length !== 1 ? 's' : ''} in the Last 24 Hours
+        </div>
+        <div style="font-size:13px;color:#aaaac8;margin-top:6px">
+          Period: ${dateLabel} ${timeLabel} → Now &nbsp;&nbsp;|&nbsp;&nbsp; Generated: ${nowLabel}
+        </div>
+      </div>
+    </td>
+  </tr>
+
+  <!-- Stats bar -->
+  <tr>
+    <td style="background:#16162a;padding:14px 40px">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          ${critCount.Critical ? `<td style="padding-right:10px"><span style="display:inline-block;background:rgba(224,85,85,.2);color:#e05555;border:1px solid rgba(224,85,85,.4);border-radius:50px;padding:4px 14px;font-size:12px;font-weight:700">⚡ Critical: ${critCount.Critical}</span></td>` : ''}
+          ${critCount.High     ? `<td style="padding-right:10px"><span style="display:inline-block;background:rgba(224,133,64,.2);color:#e08540;border:1px solid rgba(224,133,64,.4);border-radius:50px;padding:4px 14px;font-size:12px;font-weight:700">High: ${critCount.High}</span></td>` : ''}
+          ${critCount.Medium   ? `<td style="padding-right:10px"><span style="display:inline-block;background:rgba(232,197,71,.15);color:#e8c547;border:1px solid rgba(232,197,71,.35);border-radius:50px;padding:4px 14px;font-size:12px;font-weight:700">Medium: ${critCount.Medium}</span></td>` : ''}
+          ${critCount.Low      ? `<td style="padding-right:10px"><span style="display:inline-block;background:rgba(90,191,122,.15);color:#5abf7a;border:1px solid rgba(90,191,122,.35);border-radius:50px;padding:4px 14px;font-size:12px;font-weight:700">Low: ${critCount.Low}</span></td>` : ''}
+          <td align="right" style="font-size:11px;color:#8888aa;white-space:nowrap">${plantSummary}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Visit table -->
+  <tr>
+    <td style="padding:24px 40px 0">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+        style="border-radius:16px;overflow:hidden;border:1px solid #e8e8f0;">
+        <thead>
+          <tr style="background:#f4f3f0">
+            <th colspan="2" style="padding:10px 16px;text-align:left;font-size:11px;color:#6b6b88;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Visit</th>
+            <th style="padding:10px 8px;text-align:left;font-size:11px;color:#6b6b88;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Priority</th>
+            <th style="padding:10px 8px;text-align:left;font-size:11px;color:#6b6b88;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Status</th>
+            <th style="padding:10px 16px 10px 8px;text-align:right;font-size:11px;color:#6b6b88;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${visitRows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#8888aa;font-style:italic">No visits in the last 24 hours.</td></tr>`}
+        </tbody>
+      </table>
+    </td>
+  </tr>
+
+  <!-- CTA -->
+  <tr>
+    <td style="padding:28px 40px">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="border-radius:50px;background:#e8c547">
+            <a href="${appUrl}" style="display:inline-block;padding:13px 30px;font-size:14px;font-weight:700;color:#0f0f1a;text-decoration:none;border-radius:50px;letter-spacing:.3px">
+              Open PlantVisit Dashboard →
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Footer -->
+  <tr>
+    <td style="background:#0f0f1a;padding:20px 40px;border-radius:0 0 24px 24px">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="font-size:12px;color:#8888aa;line-height:1.6">
+            This <strong style="color:#aaaac8">Daily Digest</strong> was auto-generated by
+            <strong style="color:#aaaac8">PlantVisit · ${xe(company)}</strong> via Microsoft Graph API.<br>
+            You are receiving this because you are subscribed to daily visit summaries.
+          </td>
+          <td align="right" style="font-size:11px;color:#8888aa;white-space:nowrap;vertical-align:top">
+            ${new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'})}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr></table>
+</body></html>`;
+}
+
+/**
+ * sendDailyDigestEmail(force)
+ * Collects all visits created/updated in the last 24 hours and sends
+ * a consolidated digest email via Microsoft Graph API.
+ * When force=true (e.g. "Send Now" button), the daily dedup check is skipped.
+ */
+async function sendDailyDigestEmail(force = false) {
+  const az  = _settingsData.azure || {};
+  const dd  = _settingsData.dailyDigest || {};
+  const company = _settingsData?.app?.companyName || 'PlantVisit';
+
+  if (!az.msClientId || !az.msTenantId) {
+    toast('Graph API Not Configured', 'Please set up Microsoft Graph API credentials in Settings → Graph API.', true);
+    return;
+  }
+
+  const since    = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const relevant = _visitsData.filter(v => {
+    const ts = v.updatedAt || v.createdAt;
+    return ts && new Date(ts) >= since;
+  }).sort((a, b) => {
+    // Critical first, then by date descending
+    const critOrder = { Critical:0, High:1, Medium:2, Low:3 };
+    return (critOrder[a.criticality] ?? 4) - (critOrder[b.criticality] ?? 4);
+  });
+
+  const prefix    = _settingsData.notification?.subjectPrefix || '[PlantVisit]';
+  const dateStr   = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+  const subject   = `${prefix} Daily Digest — ${relevant.length} visit update${relevant.length !== 1 ? 's' : ''} | ${dateStr}`;
+
+  // Determine recipients
+  const digestRecipients = (dd.recipients || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!digestRecipients.length && az.msToEmail) digestRecipients.push(az.msToEmail);
+  if (!digestRecipients.length) {
+    toast('No Recipients', 'Please set digest recipient emails in Notification Settings.', true);
+    return;
+  }
+
+  // Update UI status if the settings panel is open
+  const statusEl = document.getElementById('dd_send_status');
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    statusEl.innerHTML = `<div class="alert alert-info">⏳ Acquiring token — Microsoft sign-in popup may appear…</div>`;
+  }
+
+  try {
+    const bodyHtml    = buildDailyDigestHtml(relevant, since, company);
+    const accessToken = await getMSGraphToken({ msClientId: az.msClientId, msTenantId: az.msTenantId });
+
+    for (const email of digestRecipients) {
+      await sendGraphMail(accessToken, { toEmail: email, subject, htmlBody: bodyHtml });
+    }
+
+    // Record last sent date (both in memory and Firestore)
+    const sentLabel = new Date().toLocaleString('en-IN');
+    _settingsData.dailyDigest = { ...dd, lastSentDate: sentLabel };
+    saveSettings();
+
+    // Also persist the send-date to localStorage to prevent double-fire on same day
+    if (!force) localStorage.setItem('pv_digest_sent_date', new Date().toDateString());
+
+    if (statusEl) {
+      statusEl.innerHTML = `<div class="alert alert-good" style="color:var(--green);background:var(--green-bg);border:1px solid rgba(90,191,122,.2)">
+        ✅ Digest sent to ${digestRecipients.join(', ')} — ${relevant.length} record${relevant.length !== 1 ? 's' : ''} included.
+      </div>`;
+      setTimeout(() => { statusEl.style.display = 'none'; }, 8000);
+    }
+
+    toast('📬 Daily Digest Sent', `${relevant.length} record${relevant.length !== 1 ? 's' : ''} summarised → ${digestRecipients.join(', ')}`);
+
+    // Refresh notifications panel to show updated lastSentDate
+    if (_settingsActiveTab === 'notifications') {
+      const settingsEl = document.getElementById('settingsContent');
+      if (settingsEl) renderNotificationSettings(settingsEl);
+    }
+
+  } catch(err) {
+    if (statusEl) {
+      statusEl.innerHTML = `<div class="alert alert-warn">❌ Failed: ${err?.message || String(err)}</div>`;
+      setTimeout(() => { statusEl.style.display = 'none'; }, 9000);
+    }
+    toast('Digest Failed', err?.message || String(err), true);
+  }
+}
+
+/**
+ * startDailyDigestScheduler()
+ * Runs a check every 60 seconds. If the configured send time matches the
+ * current minute AND the digest has not already been sent today, it fires.
+ * Uses localStorage 'pv_digest_sent_date' as the dedup key.
+ */
+let _digestSchedulerTimer = null;
+function startDailyDigestScheduler() {
+  if (_digestSchedulerTimer) return; // already running
+  _digestSchedulerTimer = setInterval(() => {
+    const dd = _settingsData.dailyDigest || {};
+    if (!dd.enabled) return;
+    if (!dd.sendTime) return;
+
+    const now     = new Date();
+    const hhmm    = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+    const today   = now.toDateString();
+    const lastDay = localStorage.getItem('pv_digest_sent_date');
+
+    if (hhmm === dd.sendTime && lastDay !== today) {
+      console.log(`[PlantVisit] 📬 Daily digest scheduled fire at ${hhmm}`);
+      sendDailyDigestEmail(false);
+    }
+  }, 60_000); // check every minute
+}
+
+function stopDailyDigestScheduler() {
+  if (_digestSchedulerTimer) { clearInterval(_digestSchedulerTimer); _digestSchedulerTimer = null; }
 }
 
 function renderAppSettings(el) {
