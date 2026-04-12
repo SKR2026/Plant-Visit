@@ -898,9 +898,24 @@ let _pendingVisitId = null; // for direct-link navigation
   const isGuest = params.get('guest');
   if (!visitId && !isGuest) return;
   if (visitId) _pendingVisitId = visitId;
-  // CSS has already hidden loginScreen & loader — run after DOM is ready
+  // CSS has already hidden loginScreen — hide loader immediately too
   document.addEventListener('DOMContentLoaded', () => {
+    // Hide page loader right away — no 800ms delay for direct links
+    const pl = document.getElementById('pageLoader');
+    if (pl) pl.classList.add('hidden');
+    // Activate guest session immediately (shows app chrome, spinner inside content)
     autoLoginGuest(visitId || null);
+    // Then boot Firestore so data arrives and populates the view
+    try {
+      firebase.auth().signInAnonymously()
+        .then(() => initFirestoreListeners())
+        .catch(err => {
+          console.warn('Firebase anonymous auth failed (direct link):', err);
+          try { initFirestoreListeners(); } catch(e2) {}
+        });
+    } catch(e) {
+      console.warn('Firebase init error (direct link):', e);
+    }
   });
 })();
 
@@ -3312,7 +3327,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('themeBtn').textContent = '☀️';
   }
 
-  // Hide loader and show login screen quickly regardless of Firebase state
+  // If this is a direct link (?visit=...&guest=1), the checkDirectLink() IIFE
+  // above already handles loader hiding + Firebase init + autoLoginGuest().
+  // Skip the normal boot sequence to avoid double-init or flashing login screen.
+  const _dlParams = new URLSearchParams(window.location.search);
+  if (_dlParams.get('visit') || _dlParams.get('guest')) return;
+
+  // Normal boot: hide loader then show login screen
   setTimeout(() => {
     document.getElementById('pageLoader').classList.add('hidden');
   }, 800);
