@@ -1188,12 +1188,49 @@ function autoLoginGuest(visitId) {
 function doLogin() {
   const username = document.getElementById('loginUser').value.trim().toLowerCase();
   const password = document.getElementById('loginPass').value;
-  const errEl = document.getElementById('loginErr');
+  const errEl    = document.getElementById('loginErr');
+  const btn      = document.querySelector('.btn-login');
   errEl.classList.remove('show');
 
-  // Try against live Firestore users first, fall back to DEFAULT_USERS
-  const user = _usersData[username] || DEFAULT_USERS[username];
-  if (!user || user.password !== password) {
+  // Always check DEFAULT_USERS first (their credentials are hardcoded and never
+  // change — this ensures built-in accounts always work regardless of Firestore
+  // load state).  Then check live _usersData for custom accounts.
+  const user = DEFAULT_USERS[username] || _usersData[username];
+
+  if (!user) {
+    // User not found at all — but Firestore might not have loaded yet.
+    // If Firebase is still connecting, wait up to 5 s then retry.
+    if (_fbStatus === 'connecting' && btn) {
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Connecting…';
+      let waited = 0;
+      const poll = setInterval(() => {
+        waited += 300;
+        // Retry now that _usersData may be populated
+        const u2 = DEFAULT_USERS[username] || _usersData[username];
+        if (u2 || waited >= 5000) {
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.textContent = origText;
+          if (u2 && u2.password === password) {
+            localStorage.setItem('pv_session', JSON.stringify({ id: username }));
+            activateSession(u2, username, null);
+            _pendingVisitId = null;
+          } else {
+            errEl.classList.add('show');
+            document.getElementById('loginPass').value = '';
+          }
+        }
+      }, 300);
+      return;
+    }
+    errEl.classList.add('show');
+    document.getElementById('loginPass').value = '';
+    return;
+  }
+
+  if (user.password !== password) {
     errEl.classList.add('show');
     document.getElementById('loginPass').value = '';
     return;
