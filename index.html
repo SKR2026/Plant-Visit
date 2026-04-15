@@ -392,6 +392,22 @@ tbody tr:hover td{background:var(--navy3)}
 select.filter-sel{background:var(--navy3);border:1px solid var(--border);color:var(--white2);border-radius:var(--radius);padding:8px 10px;font-size:12px;font-family:var(--font);cursor:pointer}
 select.filter-sel:focus{outline:none;border-color:var(--gold-bdr)}
 
+/* ─── FILTER TAB PILLS (plant & month) ───────────────────── */
+.filter-tab-row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.filter-tab-label{font-size:10px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-right:4px;white-space:nowrap}
+.ftab{
+  background:var(--navy3);border:1px solid var(--border);
+  border-radius:20px;padding:5px 13px;
+  font-size:12px;font-family:var(--font);font-weight:400;
+  color:var(--slate2);cursor:pointer;
+  white-space:nowrap;transition:all .14s;
+  user-select:none;
+}
+.ftab:hover{border-color:var(--border2);color:var(--white)}
+.ftab.active{background:var(--gold-bg);border-color:var(--gold-bdr);color:var(--gold);font-weight:600}
+.ftab.plant-tab.active{background:var(--blue-bg);border-color:rgba(74,144,226,0.3);color:var(--blue);font-weight:600}
+.ftab.month-tab.active{background:var(--purple-bg);border-color:rgba(155,114,232,0.3);color:var(--purple);font-weight:600}
+
 /* ─── FORM ───────────────────────────────────────────── */
 .form-panel{background:var(--navy2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px 26px;margin-bottom:20px}
 .form-panel-title{font-family:var(--font-display);font-size:18px;color:var(--white);margin-bottom:20px;display:flex;align-items:center;gap:10px}
@@ -1451,13 +1467,16 @@ let _bulkSelected = new Set(); // IDs currently checked for bulk-delete
 // renderRecords is defined below with filter support
 
 function filterRecords() {
+  const mc   = document.getElementById('mainContent');
   const q    = (document.getElementById('srch')?.value||'').toLowerCase();
   const crit = document.getElementById('fCrit')?.value||'';
   const stat = document.getElementById('fStatus')?.value||'';
-  const plt  = document.getElementById('fPlant')?.value||'';
+  const plt  = mc?.dataset?.fPlant || '';
+  const mon  = mc?.dataset?.fMonth || '';
   const f = _visitsCache.filter(v => {
     const txt = (v.company+v.rep+v.focus+v.agenda+v.coordinator+v.attendees+(v.visitDate||'')+(v.visitDateEnd||'')).toLowerCase();
-    return (!q||txt.includes(q))&&(!crit||v.criticality===crit)&&(!stat||v.status===stat)&&(!plt||v.plant===plt);
+    const matchMon = !mon || (v.visitDate && v.visitDate.startsWith(mon));
+    return (!q||txt.includes(q))&&(!crit||v.criticality===crit)&&(!stat||v.status===stat)&&(!plt||v.plant===plt)&&matchMon;
   });
   document.getElementById('recTable').innerHTML = buildTable(f, true);
   restoreBulkCheckboxes();
@@ -3035,8 +3054,8 @@ function toast(title, sub, isErr=false) {
 ══════════════════════════════════════════════════════════ */
 let _pendingFilter = null;
 
-function navToRecords(crit='', status='', plant='') {
-  _pendingFilter = { crit, status, plant };
+function navToRecords(crit='', status='', plant='', month='') {
+  _pendingFilter = { crit, status, plant, month };
   showTab('records');
 }
 
@@ -3046,8 +3065,39 @@ function renderRecords(el) {
   const pf = _pendingFilter || {};
   _pendingFilter = null;
   const isAdmin = currentUser && currentUser.access === 'admin';
+
+  // Build month list from actual data for the month tabs
+  const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthsInData = [...new Set(_visitsCache.map(v => {
+    if (!v.visitDate) return null;
+    const d = new Date(v.visitDate);
+    return isNaN(d) ? null : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  }).filter(Boolean))].sort();
+
+  // Plant tabs (admin/management only)
+  const plantTabsHtml = currentUser.access !== 'plant' ? `
+  <div class="filter-tab-row">
+    <span class="filter-tab-label">🏭 Plant</span>
+    <button class="ftab plant-tab${!pf.plant?' active':''}" onclick="setPlantFilter('')">All</button>
+    ${PLANTS.map(p=>`<button class="ftab plant-tab${pf.plant===p?' active':''}" onclick="setPlantFilter('${p}')">${p}</button>`).join('')}
+  </div>` : '';
+
+  // Month tabs
+  const monthTabsHtml = monthsInData.length > 0 ? `
+  <div class="filter-tab-row">
+    <span class="filter-tab-label">📅 Month</span>
+    <button class="ftab month-tab${!pf.month?' active':''}" onclick="setMonthFilter('')">All</button>
+    ${monthsInData.map(m => {
+      const [yr, mo] = m.split('-');
+      const label = MONTHS_SHORT[parseInt(mo)-1] + ' ' + yr.slice(2);
+      return `<button class="ftab month-tab${pf.month===m?' active':''}" onclick="setMonthFilter('${m}')">${label}</button>`;
+    }).join('')}
+  </div>` : '';
+
   el.innerHTML = `
   ${currentUser.access==='plant'?`<div class="alert alert-info">ℹ Showing records for <strong>${currentUser.plant}</strong> plant only.</div>`:''}
+  ${plantTabsHtml}
+  ${monthTabsHtml}
   <div class="filters">
     <div class="search-box"><input type="text" id="srch" placeholder="Search company, rep, focus, agenda…" oninput="filterRecords()"></div>
     <select class="filter-sel" id="fCrit" onchange="filterRecords()">
@@ -3058,7 +3108,6 @@ function renderRecords(el) {
       <option value="">All Status</option>
       ${STATUSES.map(s=>`<option${pf.status===s?' selected':''}>${s}</option>`).join('')}
     </select>
-    ${currentUser.access!=='plant'?`<select class="filter-sel" id="fPlant" onchange="filterRecords()"><option value="">All Plants</option>${PLANTS.map(p=>`<option${pf.plant===p?' selected':''}>${p}</option>`).join('')}</select>`:''}
     <button class="btn btn-gold btn-sm" onclick="showTab('new')">+ New Visit</button>
     ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
   </div>
@@ -3074,12 +3123,51 @@ function renderRecords(el) {
     </button>
   </div>` : ''}
   <div class="table-wrap" id="recTable"></div>`;
+
+  // Store active tab filters in DOM for filterRecords to read
+  el.dataset.fPlant = pf.plant || '';
+  el.dataset.fMonth = pf.month || '';
+
   // Apply filter immediately if pre-set
-  if (pf.crit || pf.status || pf.plant) {
+  if (pf.crit || pf.status || pf.plant || pf.month) {
     filterRecords();
   } else {
     document.getElementById('recTable').innerHTML = buildTable(_visitsCache, true);
   }
+}
+
+/* Plant tab click — update active state + re-filter */
+function setPlantFilter(plant) {
+  const mc = document.getElementById('mainContent');
+  if (!mc) return;
+  mc.dataset.fPlant = plant;
+  // Update tab active states
+  mc.querySelectorAll('.ftab.plant-tab').forEach(b => {
+    const isAll = b.textContent === 'All';
+    b.classList.toggle('active', plant === '' ? isAll : b.textContent === plant);
+  });
+  filterRecords();
+}
+
+/* Month tab click — update active state + re-filter */
+function setMonthFilter(month) {
+  const mc = document.getElementById('mainContent');
+  if (!mc) return;
+  mc.dataset.fMonth = month;
+  // Update tab active states
+  mc.querySelectorAll('.ftab.month-tab').forEach(b => {
+    const isAll = b.textContent === 'All';
+    const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    let tabMonth = '';
+    if (!isAll) {
+      // Parse label back to YYYY-MM
+      const parts = b.textContent.split(' ');
+      const mo = String(MONTHS_SHORT.indexOf(parts[0])+1).padStart(2,'0');
+      tabMonth = '20' + parts[1] + '-' + mo;
+    }
+    b.classList.toggle('active', month === '' ? isAll : tabMonth === month);
+  });
+  filterRecords();
 }
 
 /* ══════════════════════════════════════════════════════════
