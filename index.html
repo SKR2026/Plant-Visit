@@ -1044,6 +1044,28 @@ function bootApp() {
     document.body.classList.add('light');
     document.getElementById('themeBtn').textContent = '☀️';
   }
+
+  // Restore saved session — if user was already logged in, skip the login screen
+  const saved = localStorage.getItem('pv_session');
+  if (saved) {
+    try {
+      const sess = JSON.parse(saved);
+      const user = _usersData[sess.id] || DEFAULT_USERS[sess.id];
+      if (user) {
+        setTimeout(() => {
+          document.getElementById('pageLoader').classList.add('hidden');
+          activateSession(user, sess.id, null);
+        }, 400);
+        return;
+      } else {
+        // Saved session references a deleted user — clear it
+        localStorage.removeItem('pv_session');
+      }
+    } catch(e) {
+      localStorage.removeItem('pv_session');
+    }
+  }
+
   setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
 }
 
@@ -1165,7 +1187,7 @@ function doLogin() {
     return;
   }
 
-  localStorage.setItem('pv_session', JSON.stringify({ id: username, name: user.name }));
+  localStorage.setItem('pv_session', JSON.stringify({ id: username }));
   activateSession(user, username, null);
   _pendingVisitId = null;
 }
