@@ -1024,6 +1024,8 @@ function initFirestoreListeners() {
       // No Firestore document yet — seed with DEFAULT_USERS on first load
       _usersData = { ...DEFAULT_USERS };
     }
+    // After users are loaded, try to restore a previously saved login session
+    if (_appReady) tryRestoreSession();
   }, e => console.error(e));
 
   SETTINGS_DOC.onSnapshot(doc => {
@@ -1044,29 +1046,39 @@ function bootApp() {
     document.body.classList.add('light');
     document.getElementById('themeBtn').textContent = '☀️';
   }
+  // If users were already loaded before bootApp fired (race condition),
+  // try restoring session now. Otherwise USERS_DOC.onSnapshot will call it.
+  setTimeout(() => {
+    document.getElementById('pageLoader').classList.add('hidden');
+    tryRestoreSession();
+  }, 400);
+}
 
-  // Restore saved session — if user was already logged in, skip the login screen
+/**
+ * tryRestoreSession()
+ * Called by USERS_DOC.onSnapshot once user data has arrived.
+ * If a saved session exists, log the user back in automatically.
+ */
+let _sessionRestored = false;
+function tryRestoreSession() {
+  if (_sessionRestored) return;          // only run once
+  if (!_appReady) return;               // wait until app is booted
   const saved = localStorage.getItem('pv_session');
-  if (saved) {
-    try {
-      const sess = JSON.parse(saved);
-      const user = _usersData[sess.id] || DEFAULT_USERS[sess.id];
-      if (user) {
-        setTimeout(() => {
-          document.getElementById('pageLoader').classList.add('hidden');
-          activateSession(user, sess.id, null);
-        }, 400);
-        return;
-      } else {
-        // Saved session references a deleted user — clear it
-        localStorage.removeItem('pv_session');
-      }
-    } catch(e) {
+  if (!saved) return;
+  try {
+    const sess = JSON.parse(saved);
+    const user = _usersData[sess.id] || DEFAULT_USERS[sess.id];
+    if (user) {
+      _sessionRestored = true;
+      document.getElementById('pageLoader').classList.add('hidden');
+      activateSession(user, sess.id, null);
+    } else {
+      // Saved session references a deleted/unknown user — clear it
       localStorage.removeItem('pv_session');
     }
+  } catch(e) {
+    localStorage.removeItem('pv_session');
   }
-
-  setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
 }
 
 /**
