@@ -7,6 +7,10 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a1a2e'/><text y='23' x='5' font-size='20' fill='%23e8c547' font-family='Georgia'>P</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics-compat.js"></script>
 
 <!-- Microsoft MSAL – Azure AD / Microsoft Graph token acquisition -->
 <script src="https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"
@@ -570,33 +574,6 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 .settings-saved{font-size:11px;color:var(--green);display:none}
 .settings-saved.show{display:inline}
 
-/* ─── QUICK FILTER TABS ─────────────────────────────── */
-.quick-filter-row {
-  display:flex;align-items:center;gap:6px;
-  padding:8px 0 6px;
-  flex-wrap:wrap;
-  border-bottom:1px solid var(--border);
-  margin-bottom:4px;
-}
-.qf-label {
-  font-size:10px;font-weight:600;color:var(--slate);
-  text-transform:uppercase;letter-spacing:.5px;
-  white-space:nowrap;min-width:58px;flex-shrink:0;
-}
-.qf-tab {
-  background:var(--navy3);border:1px solid var(--border);
-  border-radius:20px;padding:4px 13px;
-  font-size:12px;color:var(--slate2);
-  cursor:pointer;font-family:var(--font);
-  transition:all .15s;white-space:nowrap;
-  line-height:1.4;
-}
-.qf-tab:hover { border-color:var(--border2);color:var(--white2); }
-.qf-tab.active {
-  background:var(--gold-bg);border-color:var(--gold-bdr);
-  color:var(--gold);font-weight:600;
-}
-
 /* ─── USER MGMT ──────────────────────────────────────── */
 .user-table-row td{vertical-align:middle}
 .user-plant-badge{font-size:10px;color:var(--slate2);background:var(--navy4);padding:2px 8px;border-radius:12px;border:1px solid var(--border2)}
@@ -678,7 +655,7 @@ html.guest-direct-link #mainContent { display: block !important; }
     <div class="login-err" id="loginErr">Invalid username or password. Please try again.</div>
     <div class="login-field">
       <label>Username</label>
-      <input type="text" id="loginUser" placeholder="Enter your username" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+      <input type="text" id="loginUser" placeholder="Enter your username" autocomplete="username">
     </div>
     <div class="login-field">
       <label>Password</label>
@@ -779,7 +756,7 @@ html.guest-direct-link #mainContent { display: block !important; }
 /* ══════════════════════════════════════════════════════════
    FIREBASE
 ══════════════════════════════════════════════════════════ */
-const _fbConfig = {
+const firebaseConfig = {
   apiKey:            "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
   authDomain:        "skr-task.firebaseapp.com",
   projectId:         "skr-task",
@@ -788,65 +765,19 @@ const _fbConfig = {
   appId:             "1:1011690659933:web:f57e43ee0267a475682db4",
   measurementId:     "G-67NGHMK0QR"
 };
-
-// Null-safe Firestore stub — used before Firebase loads or if it fails
-const _nullDoc = { set:()=>Promise.resolve(), delete:()=>Promise.resolve(), update:()=>Promise.resolve(), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({exists:false,data:()=>({}),docs:[]}),0); return ()=>{};}, get:()=>Promise.resolve({exists:false,data:()=>({})}) };
+// Null-safe Firestore stub used when Firebase is unavailable
+const _nullDoc = { set:()=>Promise.resolve(), delete:()=>Promise.resolve(), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({exists:false,data:()=>({}),docs:[]}),0); return ()=>{};}, get:()=>Promise.resolve({exists:false,data:()=>({})}) };
 const _nullCol = { doc:()=>_nullDoc, orderBy:()=>({onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({docs:[]}),0); return ()=>{}; }}), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({docs:[]}),0); return ()=>{}; }, add:()=>Promise.resolve(_nullDoc), limit:()=>({get:()=>Promise.resolve({docs:[]})}) };
-const _nullDb  = { collection:()=>_nullCol, batch:()=>({set:()=>{},delete:()=>{},commit:()=>Promise.resolve()}) };
-
-let db      = _nullDb;  // replaced once Firebase loads
-let _fbReady = false;   // true once signInAnonymously succeeds
-
-const VISITS_COL   = 'visits';
-// These are defined as getters so they always use the current `db` reference
-function _mailDoc()     { return db.collection('config').doc('mailLogs'); }
-function _usersDoc()    { return db.collection('config').doc('appUsers'); }
-function _settingsDoc() { return db.collection('config').doc('appSettings'); }
-
-// Back-compat aliases used throughout the file
-const MAIL_DOC     = { set:(v)=>_mailDoc().set(v), onSnapshot:(cb,eb)=>_mailDoc().onSnapshot(cb,eb) };
-const USERS_DOC    = { set:(v)=>_usersDoc().set(v), onSnapshot:(cb,eb)=>_usersDoc().onSnapshot(cb,eb) };
-const SETTINGS_DOC = { set:(v)=>_settingsDoc().set(v), onSnapshot:(cb,eb)=>_settingsDoc().onSnapshot(cb,eb) };
-
-// ── Dynamic Firebase SDK loading (same pattern as working app) ──────
-(function loadFirebaseSDKs() {
-  function loadScript(src, onload, onerror) {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = onload;
-    s.onerror = onerror || (() => console.error('Failed to load: ' + src));
-    document.head.appendChild(s);
-  }
-  loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js', () => {
-    loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js', () => {
-      loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js', () => {
-        initFirebaseCore();
-      }, () => { console.error('Firebase Auth SDK failed'); initFirebaseCore(); });
-    }, () => { console.error('Firestore SDK failed'); setFbStatus('error'); bootApp(); });
-  }, () => { console.error('Firebase App SDK failed'); setFbStatus('error'); bootApp(); });
-})();
-
-function initFirebaseCore() {
-  try {
-    if (!firebase.apps.length) firebase.initializeApp(_fbConfig);
-    db = firebase.firestore();
-    firebase.auth().signInAnonymously()
-      .then(() => {
-        console.log('[PlantVisit] Firebase anonymous auth OK');
-        _fbReady = true;
-        initFirestoreListeners();
-      })
-      .catch(e => {
-        console.warn('[PlantVisit] Anonymous auth failed, trying without auth:', e.message);
-        // Try listeners anyway — rules may allow unauthenticated reads
-        initFirestoreListeners();
-      });
-  } catch(e) {
-    console.warn('[PlantVisit] Firebase init error:', e.message);
-    setFbStatus('error');
-    bootApp(); // fall back — DEFAULT_USERS still work
-  }
-}
+const _nullDb = { collection:()=>_nullCol, batch:()=>({set:()=>{},delete:()=>{},commit:()=>Promise.resolve()}) };
+let db = _nullDb;
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+} catch(e) { console.warn('Firebase init failed — running in offline mode:', e); }
+const VISITS_COL = 'visits';
+const MAIL_DOC   = db.collection('config').doc('mailLogs');
+const USERS_DOC  = db.collection('config').doc('appUsers');
+const SETTINGS_DOC = db.collection('config').doc('appSettings');
 
 /* ══════════════════════════════════════════════════════════
    FIREBASE LIVE STATUS
@@ -983,8 +914,17 @@ let _pendingVisitId = null; // for direct-link navigation
     if (pl) pl.classList.add('hidden');
     // Activate guest session immediately (shows app chrome, spinner inside content)
     autoLoginGuest(visitId || null);
-    // Firebase SDKs are loaded dynamically — initFirestoreListeners() will be called
-    // once initFirebaseCore() completes. Nothing extra needed here.
+    // Then boot Firestore so data arrives and populates the view
+    try {
+      firebase.auth().signInAnonymously()
+        .then(() => initFirestoreListeners())
+        .catch(err => {
+          console.warn('Firebase anonymous auth failed (direct link):', err);
+          try { initFirestoreListeners(); } catch(e2) {}
+        });
+    } catch(e) {
+      console.warn('Firebase init error (direct link):', e);
+    }
   });
 })();
 
@@ -1012,11 +952,7 @@ function saveSettings() {
   SETTINGS_DOC.set(_settingsData).catch(e => console.error(e));
 }
 
-let _firestoreInitialized = false;
 function initFirestoreListeners() {
-  if (_firestoreInitialized) return;
-  _firestoreInitialized = true;
-
   db.collection(VISITS_COL).orderBy('createdAt','asc').onSnapshot(snapshot => {
     setFbStatus('live');
     startSyncClock();
@@ -1042,27 +978,18 @@ function initFirestoreListeners() {
 
   USERS_DOC.onSnapshot(doc => {
     if (doc.exists && doc.data().users) {
-      // Firestore is the source of truth — use live data as-is.
-      // Merge with DEFAULT_USERS only for accounts not yet in Firestore (first-ever load).
+      // Merge Firestore users on top of DEFAULT_USERS, but always preserve
+      // DEFAULT_USERS passwords/access for built-in accounts so login works
       const firestoreUsers = doc.data().users;
-      const merged = { ...firestoreUsers };
+      const merged = { ...DEFAULT_USERS, ...firestoreUsers };
+      // Re-apply DEFAULT_USERS credentials for built-in accounts to prevent lockout
       Object.keys(DEFAULT_USERS).forEach(key => {
-        if (!merged[key]) {
-          // Not in Firestore yet — seed it from DEFAULT_USERS
-          merged[key] = { ...DEFAULT_USERS[key] };
+        if (merged[key]) {
+          merged[key] = { ...merged[key], password: DEFAULT_USERS[key].password, access: DEFAULT_USERS[key].access };
         }
-        // If already in Firestore, use Firestore data as-is (passwords, access, etc.)
-        // Do NOT lock credentials back to hardcoded values
       });
       _usersData = merged;
-    } else {
-      // No Firestore document yet — seed with DEFAULT_USERS on first load
-      _usersData = { ...DEFAULT_USERS };
-      // Write defaults to Firestore so they persist
-      USERS_DOC.set({ users: _usersData }).catch(e => console.warn('Could not seed users:', e));
     }
-    // After users are loaded, try to restore a previously saved login session
-    if (_appReady) tryRestoreSession();
   }, e => console.error(e));
 
   SETTINGS_DOC.onSnapshot(doc => {
@@ -1077,47 +1004,13 @@ function initFirestoreListeners() {
 }
 
 function bootApp() {
-  if (_appReady) return; // prevent double-boot
   _appReady = true;
   if (localStorage.getItem('pv_theme') === 'light') {
     darkMode = true;
     document.body.classList.add('light');
-    const tb = document.getElementById('themeBtn');
-    if (tb) tb.textContent = '☀️';
+    document.getElementById('themeBtn').textContent = '☀️';
   }
-  // Hide loader and show login screen (or restore saved session)
-  setTimeout(() => {
-    const pl = document.getElementById('pageLoader');
-    if (pl) pl.classList.add('hidden');
-    tryRestoreSession();
-  }, 300);
-}
-
-/**
- * tryRestoreSession()
- * Called by USERS_DOC.onSnapshot once user data has arrived.
- * If a saved session exists, log the user back in automatically.
- */
-let _sessionRestored = false;
-function tryRestoreSession() {
-  if (_sessionRestored) return;          // only run once
-  if (!_appReady) return;               // wait until app is booted
-  const saved = localStorage.getItem('pv_session');
-  if (!saved) return;
-  try {
-    const sess = JSON.parse(saved);
-    const user = _usersData[sess.id] || DEFAULT_USERS[sess.id];
-    if (user) {
-      _sessionRestored = true;
-      document.getElementById('pageLoader').classList.add('hidden');
-      activateSession(user, sess.id, null);
-    } else {
-      // Saved session references a deleted/unknown user — clear it
-      localStorage.removeItem('pv_session');
-    }
-  } catch(e) {
-    localStorage.removeItem('pv_session');
-  }
+  setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
 }
 
 /**
@@ -1225,67 +1118,22 @@ function autoLoginGuest(visitId) {
 }
 
 function doLogin() {
-  const username = (document.getElementById('loginUser').value || '').trim().toLowerCase();
-  const password = (document.getElementById('loginPass').value || '');
-  const errEl    = document.getElementById('loginErr');
-  const btn      = document.querySelector('.btn-login');
-
+  const username = document.getElementById('loginUser').value.trim().toLowerCase();
+  const password = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginErr');
   errEl.classList.remove('show');
 
-  if (!username) {
-    errEl.textContent = 'Please enter your username.';
+  // Try against live Firestore users first, fall back to DEFAULT_USERS
+  const user = _usersData[username] || DEFAULT_USERS[username];
+  if (!user || user.password !== password) {
     errEl.classList.add('show');
-    document.getElementById('loginUser').focus();
-    return;
-  }
-  if (!password) {
-    errEl.textContent = 'Please enter your password.';
-    errEl.classList.add('show');
-    document.getElementById('loginPass').focus();
+    document.getElementById('loginPass').value = '';
     return;
   }
 
-  // Show loading state
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Signing in…'; }
-
-  // Inner login executor — matches pattern from working app's adminLogin/plantOwnerLogin
-  const doLoginWith = (users) => {
-    if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
-    const user = (users && users[username]) || DEFAULT_USERS[username];
-    if (!user) {
-      errEl.textContent = 'Username not found. Please check and try again.';
-      errEl.classList.add('show');
-      document.getElementById('loginPass').value = '';
-      document.getElementById('loginPass').focus();
-      return;
-    }
-    if (user.password !== password) {
-      errEl.textContent = 'Incorrect password. Please try again.';
-      errEl.classList.add('show');
-      document.getElementById('loginPass').value = '';
-      document.getElementById('loginPass').focus();
-      return;
-    }
-    // ✅ Login success
-    localStorage.setItem('pv_session', JSON.stringify({ id: username }));
-    activateSession(user, username, null);
-    _pendingVisitId = null;
-  };
-
-  // Try Firestore first (same pattern as working app), fall back to _usersData / DEFAULT_USERS
-  if (_fbReady && db !== _nullDb) {
-    db.collection('config').doc('appUsers').get()
-      .then(d => {
-        const firestoreUsers = (d.exists && d.data().users) ? d.data().users : null;
-        doLoginWith(firestoreUsers || _usersData);
-      })
-      .catch(() => {
-        doLoginWith(_usersData);
-      });
-  } else {
-    // Firebase not ready yet — use in-memory _usersData (already has DEFAULT_USERS)
-    doLoginWith(_usersData);
-  }
+  localStorage.setItem('pv_session', JSON.stringify({ id: username, name: user.name }));
+  activateSession(user, username, null);
+  _pendingVisitId = null;
 }
 
 /** Guest login — no password. Opens the dashboard (or a specific visit if one is pending). */
@@ -1606,13 +1454,10 @@ function filterRecords() {
   const q    = (document.getElementById('srch')?.value||'').toLowerCase();
   const crit = document.getElementById('fCrit')?.value||'';
   const stat = document.getElementById('fStatus')?.value||'';
-  // Read active tab values instead of dropdowns
-  const plt  = document.querySelector('#plantTabRow .qf-tab.active')?.dataset?.plant || '';
-  const mon  = document.querySelector('#monthTabRow .qf-tab.active')?.dataset?.month || '';
+  const plt  = document.getElementById('fPlant')?.value||'';
   const f = _visitsCache.filter(v => {
     const txt = (v.company+v.rep+v.focus+v.agenda+v.coordinator+v.attendees+(v.visitDate||'')+(v.visitDateEnd||'')).toLowerCase();
-    const inMonth = !mon || (v.visitDate && v.visitDate.slice(0,7) === mon);
-    return (!q||txt.includes(q))&&(!crit||v.criticality===crit)&&(!stat||v.status===stat)&&(!plt||v.plant===plt)&&inMonth;
+    return (!q||txt.includes(q))&&(!crit||v.criticality===crit)&&(!stat||v.status===stat)&&(!plt||v.plant===plt);
   });
   document.getElementById('recTable').innerHTML = buildTable(f, true);
   restoreBulkCheckboxes();
@@ -3201,14 +3046,6 @@ function renderRecords(el) {
   const pf = _pendingFilter || {};
   _pendingFilter = null;
   const isAdmin = currentUser && currentUser.access === 'admin';
-  const showPlantTabs = currentUser.access !== 'plant';
-
-  // Build month list from actual visit data (up to last 12 months with records)
-  const monthSet = new Set();
-  _visitsCache.forEach(v => { if (v.visitDate) monthSet.add(v.visitDate.slice(0,7)); });
-  const monthsSorted = [...monthSet].sort().reverse().slice(0,12);
-  const ML = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-
   el.innerHTML = `
   ${currentUser.access==='plant'?`<div class="alert alert-info">ℹ Showing records for <strong>${currentUser.plant}</strong> plant only.</div>`:''}
   <div class="filters">
@@ -3221,27 +3058,10 @@ function renderRecords(el) {
       <option value="">All Status</option>
       ${STATUSES.map(s=>`<option${pf.status===s?' selected':''}>${s}</option>`).join('')}
     </select>
+    ${currentUser.access!=='plant'?`<select class="filter-sel" id="fPlant" onchange="filterRecords()"><option value="">All Plants</option>${PLANTS.map(p=>`<option${pf.plant===p?' selected':''}>${p}</option>`).join('')}</select>`:''}
     <button class="btn btn-gold btn-sm" onclick="showTab('new')">+ New Visit</button>
     ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
   </div>
-
-  ${showPlantTabs ? `
-  <div class="quick-filter-row" id="plantTabRow">
-    <span class="qf-label">🏭 Plant</span>
-    <button class="qf-tab${'' === (pf.plant||'') ? ' active' : ''}" data-plant="" onclick="setPlantTab(this)">All</button>
-    ${PLANTS.map(p=>`<button class="qf-tab${pf.plant===p?' active':''}" data-plant="${xe(p)}" onclick="setPlantTab(this)">${xe(p)}</button>`).join('')}
-  </div>` : ''}
-
-  <div class="quick-filter-row" id="monthTabRow">
-    <span class="qf-label">📅 Month</span>
-    <button class="qf-tab${'' === (pf.month||'') ? ' active' : ''}" data-month="" onclick="setMonthTab(this)">All</button>
-    ${monthsSorted.map(ym => {
-      const [yr, mo] = ym.split('-');
-      const label = (ML[mo]||mo) + ' '' + yr.slice(2);
-      return `<button class="qf-tab${pf.month===ym?' active':''}" data-month="${ym}" onclick="setMonthTab(this)">${label}</button>`;
-    }).join('')}
-  </div>
-
   ${isAdmin ? `
   <div class="bulk-bar" id="bulkBar">
     <div class="bulk-bar-count">
@@ -3254,30 +3074,18 @@ function renderRecords(el) {
     </button>
   </div>` : ''}
   <div class="table-wrap" id="recTable"></div>`;
-
-  if (pf.crit || pf.status || pf.plant || pf.month) {
+  // Apply filter immediately if pre-set
+  if (pf.crit || pf.status || pf.plant) {
     filterRecords();
   } else {
     document.getElementById('recTable').innerHTML = buildTable(_visitsCache, true);
   }
 }
 
-function setPlantTab(btn) {
-  document.querySelectorAll('#plantTabRow .qf-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  filterRecords();
-}
-
-function setMonthTab(btn) {
-  document.querySelectorAll('#monthTabRow .qf-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  filterRecords();
-}
-
 /* ══════════════════════════════════════════════════════════
    PLANT MANAGEMENT (Admin only)
 ══════════════════════════════════════════════════════════ */
-const PLANTS_DOC = { set:(v)=>db.collection('config').doc('appPlants').set(v), onSnapshot:(cb,eb)=>db.collection('config').doc('appPlants').onSnapshot(cb,eb) };
+const PLANTS_DOC = db.collection('config').doc('appPlants'); // safe: db is null-safe
 
 function savePlants() {
   PLANTS_DOC.set({ plants: PLANTS }).catch(e => console.error(e));
@@ -3402,7 +3210,7 @@ function deletePlant(idx, name) {
 /* ══════════════════════════════════════════════════════════
    CATEGORY MANAGEMENT (Admin only)
 ══════════════════════════════════════════════════════════ */
-const CATEGORIES_DOC = { set:(v)=>db.collection('config').doc('appCategories').set(v), onSnapshot:(cb,eb)=>db.collection('config').doc('appCategories').onSnapshot(cb,eb) };
+const CATEGORIES_DOC = db.collection('config').doc('appCategories');
 
 function saveCategories() {
   CATEGORIES_DOC.set({ categories: CATEGORIES }).catch(e => console.error(e));
@@ -3542,24 +3350,36 @@ document.addEventListener('DOMContentLoaded', () => {
   if (localStorage.getItem('pv_theme') === 'light') {
     darkMode = true;
     document.body.classList.add('light');
-    const tb = document.getElementById('themeBtn');
-    if (tb) tb.textContent = '☀️';
+    document.getElementById('themeBtn').textContent = '☀️';
   }
 
-  // If this is a direct link (?visit=...&guest=1), checkDirectLink() IIFE handles it
+  // If this is a direct link (?visit=...&guest=1), the checkDirectLink() IIFE
+  // above already handles loader hiding + Firebase init + autoLoginGuest().
+  // Skip the normal boot sequence to avoid double-init or flashing login screen.
   const _dlParams = new URLSearchParams(window.location.search);
   if (_dlParams.get('visit') || _dlParams.get('guest')) return;
 
-  // Hard failsafe — force-boot login after 6s if Firebase never responds
+  // Normal boot: hide loader then show login screen
   setTimeout(() => {
-    if (!_appReady) {
-      console.warn('[PlantVisit] Boot timeout — forcing login screen');
-      bootApp();
-    }
-  }, 6000);
+    document.getElementById('pageLoader').classList.add('hidden');
+  }, 800);
+  // Hard failsafe - force show login if still loading after 3s
+  setTimeout(() => {
+    const pl = document.getElementById('pageLoader');
+    if (pl && !pl.classList.contains('hidden')) pl.classList.add('hidden');
+  }, 3000);
 
-  // Firebase SDKs are loaded dynamically by loadFirebaseSDKs() above.
-  // Chain: loadFirebaseSDKs → initFirebaseCore → signInAnonymously → initFirestoreListeners → bootApp
+  // Sign in anonymously to satisfy Firestore auth rules, then start listeners
+  try {
+    firebase.auth().signInAnonymously()
+      .then(() => initFirestoreListeners())
+      .catch(err => {
+        console.warn('Firebase anonymous auth failed:', err);
+        try { initFirestoreListeners(); } catch(e2) { console.warn('Firestore listener error:', e2); }
+      });
+  } catch(e) {
+    console.warn('Firebase init error:', e);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════
