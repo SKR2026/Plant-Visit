@@ -2884,7 +2884,7 @@ function renderUserManagement(el) {
     <td>${u.access==='admin'?`<span class="badge badge-admin">Admin</span>`:u.access==='management'?`<span class="badge badge-gold">Management</span>`:`<span class="badge badge-medium">Plant User</span>`}</td>
     <td>${u.plant?`<span class="user-plant-badge">${xe(u.plant)}</span>`:'<span style="color:var(--slate);font-size:11px">All</span>'}</td>
     <td style="text-align:right;white-space:nowrap">
-      <button class="btn btn-ghost btn-sm" onclick="openEditUser('${id}')">Edit</button>
+      ${id !== 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="openEditUser('${id}')">Edit</button>` : ''}
       ${id !== currentUser.id && id !== 'admin' ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${id}','${xe(u.name)}')">Delete</button>` : ''}
     </td>
   </tr>`).join('');
