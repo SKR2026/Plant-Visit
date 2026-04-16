@@ -1654,6 +1654,7 @@ function renderForm(el, data) {
       <div class="form-section-label">Coordination</div>
       <div class="fg"><label>Co-Ordinator <span class="req">*</span></label><input type="text" id="f_coordinator" value="${xe(d.coordinator||currentUser.name||'')}" placeholder="Internal coordinator name"></div>
       <div class="fg"><label>Attendees</label><input type="text" id="f_attendees" value="${xe(d.attendees||'')}" placeholder="Comma-separated list"></div>
+      <div class="fg"><label>Meeting Room <span style="font-size:10px;color:var(--slate);font-weight:400">(optional)</span></label><input type="text" id="f_meetingRoom" value="${xe(d.meetingRoom||'')}" placeholder="e.g. Boardroom A, Conf Room 2"></div>
     </div>
     <div style="margin-top:16px">
       <div class="fg full"><label>Agenda <span class="req">*</span></label><textarea id="f_agenda" placeholder="Full agenda and purpose…">${xe(d.agenda||'')}</textarea></div>
@@ -1716,7 +1717,7 @@ function collectForm() {
   }
   const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
   if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
-  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
+  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), meetingRoom:v('f_meetingRoom').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
 }
 
 function saveVisit(editId) {
@@ -1968,6 +1969,7 @@ function openView(id) {
       <div class="detail-item"><div class="detail-label">Coordinator</div><div class="detail-value">${xe(v.coordinator)}</div></div>
       <div class="detail-item"><div class="detail-label">Status</div><div class="detail-value">${statusBadge(v.status)}</div></div>
       <div class="detail-item detail-full"><div class="detail-label">Attendees</div><div class="detail-value">${xe(v.attendees)||'—'}</div></div>
+      ${v.meetingRoom?`<div class="detail-item"><div class="detail-label">Meeting Room</div><div class="detail-value em">🚪 ${xe(v.meetingRoom)}</div></div>`:''}
       <div class="detail-item detail-full"><div class="detail-label">Agenda</div><div class="detail-value" style="line-height:1.6">${xe(v.agenda)}</div></div>
       <div class="detail-item"><div class="detail-label">Stay Required</div><div class="detail-value">${v.stay==='Y'?'<span class="badge badge-medium">Yes</span>':'No'}</div></div>
       ${v.stay==='Y'?`<div class="detail-item"><div class="detail-label">Proposed Hotel</div><div class="detail-value em">${xe(v.hotel||'TBD')}</div></div>`:''}
@@ -2235,6 +2237,7 @@ function logMail(record, isUpdate) {
         ['🔎','Focus Area',  record.focus || '—'],
         ['👷','Coordinator', record.coordinator || '—'],
         ['🏨','Hotel Stay',  record.stay === 'Y' ? `Yes — ${record.hotel || 'TBD'}` : 'No'],
+        ...(record.meetingRoom ? [['🚪','Meeting Room', record.meetingRoom]] : []),
       ].map(([icon, label, value], i) => `
       <tr style="background:${i%2===0?'#fafafe':'#f4f4fb'};">
         <td style="padding:12px 18px;width:36px;font-size:16px;vertical-align:middle;">${icon}</td>
@@ -3094,14 +3097,106 @@ function deleteUser(id, name) {
 ══════════════════════════════════════════════════════════ */
 function exportCSV() {
   const visits = getVisible();
-  const headers = ['ID','Confirm Date','Visit Date From','Visit Date To','Duration (days)','Plant','Company','Representative','Category','Criticality','Focus Area','Agenda','Coordinator','Attendees','Stay','Hotel','Remarks','Status','Created At'];
-  const rows = visits.map(v => { const _d=(v.visitDateEnd&&v.visitDateEnd!==v.visitDate)?Math.round((new Date(v.visitDateEnd)-new Date(v.visitDate))/86400000)+1:1; return [v.id,v.confirmDate,v.visitDate,v.visitDateEnd||v.visitDate,_d,v.plant,v.company,v.rep,v.category,v.criticality,v.focus,v.agenda,v.coordinator,v.attendees,v.stay,v.hotel||'',v.remarks||'',v.status,v.createdAt||''].map(cv=>`"${String(cv).replace(/"/g,'""')}"`).join(','); });
+  const headers = ['ID','Confirm Date','Visit Date From','Visit Date To','Duration (days)','Plant','Company','Representative','Category','Criticality','Focus Area','Agenda','Coordinator','Attendees','Meeting Room','Stay','Hotel','Remarks','Status','Created At'];
+  const rows = visits.map(v => { const _d=(v.visitDateEnd&&v.visitDateEnd!==v.visitDate)?Math.round((new Date(v.visitDateEnd)-new Date(v.visitDate))/86400000)+1:1; return [v.id,v.confirmDate,v.visitDate,v.visitDateEnd||v.visitDate,_d,v.plant,v.company,v.rep,v.category,v.criticality,v.focus,v.agenda,v.coordinator,v.attendees,v.meetingRoom||'',v.stay,v.hotel||'',v.remarks||'',v.status,v.createdAt||''].map(cv=>`"${String(cv).replace(/"/g,'""')}"`).join(','); });
   const csv = [headers.join(','),...rows].join('\n');
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download = `plantvisit_export_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   toast('Export Ready', `${visits.length} records exported.`);
+}
+
+function exportPDF() {
+  const visits = getVisible();
+  if (!visits.length) { toast('No Records', 'No visit records to export.', true); return; }
+
+  const CRIT_COLOR = { Critical:'#e05555', High:'#e08540', Medium:'#e8c547', Low:'#5abf7a' };
+  const STAT_COLOR = { Scheduled:'#4a90e2', Confirmed:'#e8c547', Completed:'#5abf7a', Cancelled:'#e05555' };
+  const company = _settingsData?.app?.companyName || 'PlantVisit';
+  const now = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+
+  const rows = visits.map(v => {
+    const dur = (v.visitDateEnd && v.visitDateEnd !== v.visitDate)
+      ? Math.round((new Date(v.visitDateEnd)-new Date(v.visitDate))/86400000)+1 : 1;
+    const cc = CRIT_COLOR[v.criticality]||'#888';
+    const sc = STAT_COLOR[v.status]||'#888';
+    return `<tr>
+      <td style="font-size:12px;color:#1a1a2e;white-space:nowrap">${fmtDate(v.visitDate)}${v.visitDateEnd&&v.visitDateEnd!==v.visitDate?`<br><span style="color:#888;font-size:10px">→ ${fmtDate(v.visitDateEnd)}</span>`:''}</td>
+      <td style="font-size:11px;color:#666;white-space:nowrap">${dur}d</td>
+      <td><div style="font-weight:600;font-size:13px;color:#1a1a2e">${v.company||''}</div><div style="font-size:10px;color:#888">${v.focus||''}</div></td>
+      <td style="font-size:12px;color:#1a1a2e">${v.rep||''}</td>
+      <td style="font-size:11px;color:#555">${v.plant||''}</td>
+      <td><span style="background:${cc}20;color:${cc};border:1px solid ${cc}55;border-radius:50px;padding:2px 10px;font-size:10px;font-weight:600;white-space:nowrap">${v.criticality||''}</span></td>
+      <td><span style="background:${sc}20;color:${sc};border:1px solid ${sc}55;border-radius:50px;padding:2px 10px;font-size:10px;font-weight:600;white-space:nowrap">${v.status||''}</span></td>
+      <td style="font-size:11px;color:#555">${v.meetingRoom||'—'}</td>
+      <td style="font-size:11px;color:#555">${v.stay==='Y'?'✓ Yes':'No'}</td>
+      <td style="font-size:11px;color:#555">${v.coordinator||''}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PlantVisit Export — ${now}</title>
+<style>
+  @page { margin: 16mm 12mm; size: A4 landscape; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1a1a2e; font-size: 12px; }
+  .header { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 0 12px; border-bottom: 2px solid #e8c547; margin-bottom: 16px; }
+  .brand { font-size: 22px; font-weight: 700; color: #0f0f1a; letter-spacing: -0.5px; }
+  .brand span { color: #e8c547; }
+  .meta { font-size: 10px; color: #888; text-align: right; line-height: 1.6; }
+  .summary { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .sum-pill { background: #f4f4fb; border: 1px solid #e0e0f0; border-radius: 20px; padding: 5px 14px; font-size: 11px; color: #444; }
+  .sum-pill strong { color: #1a1a2e; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: #0f0f1a; color: #e8c547; }
+  thead th { padding: 8px 10px; text-align: left; font-size: 9px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid #eeeef8; }
+  tbody tr:nth-child(even) { background: #fafafe; }
+  tbody td { padding: 7px 10px; vertical-align: middle; }
+  .footer { margin-top: 14px; font-size: 9px; color: #aaa; text-align: center; border-top: 1px solid #eee; padding-top: 8px; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="brand">Plant<span>Visit</span></div>
+    <div style="font-size:11px;color:#888;margin-top:2px">${company} · Visit Records Report</div>
+  </div>
+  <div class="meta">
+    Generated: ${now}<br>
+    Records: ${visits.length}<br>
+    Exported by: ${currentUser?.name||'Admin'}
+  </div>
+</div>
+<div class="summary">
+  <div class="sum-pill">Total <strong>${visits.length}</strong></div>
+  <div class="sum-pill">Scheduled <strong style="color:#4a90e2">${visits.filter(v=>v.status==='Scheduled').length}</strong></div>
+  <div class="sum-pill">Confirmed <strong style="color:#e8c547">${visits.filter(v=>v.status==='Confirmed').length}</strong></div>
+  <div class="sum-pill">Completed <strong style="color:#5abf7a">${visits.filter(v=>v.status==='Completed').length}</strong></div>
+  <div class="sum-pill">Critical <strong style="color:#e05555">${visits.filter(v=>v.criticality==='Critical').length}</strong></div>
+</div>
+<table>
+  <thead><tr>
+    <th>Visit Date</th><th>Dur</th><th>Company / Focus</th><th>Representative</th>
+    <th>Plant</th><th>Criticality</th><th>Status</th><th>Meeting Room</th><th>Stay</th><th>Coordinator</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<div class="footer">PlantVisit · ${company} · Confidential — Generated ${now} · ${visits.length} record${visits.length!==1?'s':''}</div>
+<script>window.onload=function(){window.print();}<\/script>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { toast('Popup Blocked', 'Please allow popups for PDF export.', true); return; }
+  win.document.write(html);
+  win.document.close();
+  toast('📄 PDF Ready', `Print dialog opened for ${visits.length} records.`);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -3198,7 +3293,7 @@ function renderRecords(el) {
       ${STATUSES.map(s=>`<option${pf.status===s?' selected':''}>${s}</option>`).join('')}
     </select>
     <button class="btn btn-gold btn-sm" onclick="showTab('new')">+ New Visit</button>
-    ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
+    ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export CSV</button><button class="btn btn-ghost btn-sm" onclick="exportPDF()" style="color:var(--red);border-color:rgba(224,85,85,.3)">⬇ Export PDF</button>`:''}
   </div>
   ${isAdmin ? `
   <div class="bulk-bar" id="bulkBar">
