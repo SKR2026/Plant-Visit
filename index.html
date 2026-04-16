@@ -594,6 +594,72 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 .user-table-row td{vertical-align:middle}
 .user-plant-badge{font-size:10px;color:var(--slate2);background:var(--navy4);padding:2px 8px;border-radius:12px;border:1px solid var(--border2)}
 
+/* ─── NOTIFICATION BELL ──────────────────────────────── */
+.notif-bell-btn {
+  position:relative;width:36px;height:36px;border-radius:var(--radius);
+  background:var(--navy3);border:1px solid var(--border);
+  color:var(--slate2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;transition:all .2s;flex-shrink:0;
+}
+.notif-bell-btn:hover{border-color:var(--gold-bdr);color:var(--gold)}
+.notif-bell-btn.has-unread{border-color:rgba(232,197,71,.4);color:var(--gold)}
+.notif-badge {
+  position:absolute;top:-4px;right:-4px;
+  background:var(--red);color:#fff;
+  font-size:9px;font-weight:700;
+  min-width:16px;height:16px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  padding:0 3px;line-height:1;
+  animation:bellPulse .4s ease;
+  display:none;
+}
+.notif-badge.show{display:flex}
+@keyframes bellPulse{0%{transform:scale(.6)}60%{transform:scale(1.2)}100%{transform:scale(1)}}
+.notif-panel {
+  position:absolute;top:calc(100% + 8px);right:0;
+  background:var(--navy2);border:1px solid var(--border2);
+  border-radius:var(--radius-lg);padding:0;
+  width:360px;max-width:96vw;box-shadow:var(--shadow);
+  z-index:300;animation:slideDown .15s ease;
+  display:none;
+}
+.notif-panel.open{display:block}
+.notif-panel-header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 16px;border-bottom:1px solid var(--border);
+}
+.notif-panel-title{font-size:13px;font-weight:600;color:var(--white)}
+.notif-panel-actions{display:flex;gap:8px}
+.notif-mark-all{
+  font-size:10px;color:var(--slate2);background:none;border:none;
+  cursor:pointer;padding:3px 8px;border-radius:4px;transition:all .12s;
+}
+.notif-mark-all:hover{background:var(--navy4);color:var(--white)}
+.notif-list{max-height:340px;overflow-y:auto;}
+.notif-item{
+  display:flex;gap:12px;padding:12px 16px;
+  border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .12s;
+  align-items:flex-start;
+}
+.notif-item:last-child{border-bottom:none}
+.notif-item:hover{background:var(--navy3)}
+.notif-item.unread{background:rgba(232,197,71,.05)}
+.notif-item.unread .notif-dot{background:var(--gold)}
+.notif-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:transparent;flex-shrink:0;margin-top:4px;
+}
+.notif-item-body{flex:1;min-width:0}
+.notif-item-title{font-size:12px;font-weight:500;color:var(--white);margin-bottom:2px}
+.notif-item-meta{font-size:11px;color:var(--slate)}
+.notif-empty{text-align:center;padding:28px 16px;color:var(--slate);font-size:12px}
+.notif-footer{
+  padding:8px 16px;border-top:1px solid var(--border);
+  text-align:center;font-size:11px;color:var(--slate);
+}
+
 /* ─── RESPONSIVE ─────────────────────────────────────── */
 @media(max-width:1100px){.plant-stats-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){.metric-grid,.metric-grid-5{grid-template-columns:1fr 1fr}.chart-grid,.chart-grid.three{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr 1fr}.plant-stats-grid{grid-template-columns:1fr}}
@@ -724,6 +790,26 @@ html.guest-direct-link #mainContent { display: block !important; }
       <div class="user-dd-item" id="ddSignIn" style="display:none" onclick="doLogout()">🔐 Sign In with Account</div>
       <div class="user-dd-divider"></div>
       <div class="user-dd-item danger" onclick="doLogout()">↩ Sign Out</div>
+    </div>
+  </div>
+  <!-- NOTIFICATION BELL -->
+  <div style="position:relative" id="notifBellWrap">
+    <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="Notifications" style="display:none">
+      🔔
+      <span class="notif-badge" id="notifBadge">0</span>
+    </button>
+    <div class="notif-panel" id="notifPanel">
+      <div class="notif-panel-header">
+        <div class="notif-panel-title">🔔 Notifications</div>
+        <div class="notif-panel-actions">
+          <button class="notif-mark-all" onclick="markAllNotifsRead()">Mark all read</button>
+          <button class="notif-mark-all" onclick="clearAllNotifs()">Clear all</button>
+        </div>
+      </div>
+      <div class="notif-list" id="notifList">
+        <div class="notif-empty">No notifications yet</div>
+      </div>
+      <div class="notif-footer">Only admins see notifications</div>
     </div>
   </div>
   <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
@@ -1083,6 +1169,9 @@ function activateSession(user, id, visitId) {
   if (ddSI) ddSI.style.display = isGuestUser ? '' : 'none';
 
   updateBadges();
+
+  // ★ Initialize in-app notification bell
+  initNotifBell();
 
   // Start daily-digest scheduler (fires at configured time once per day)
   startDailyDigestScheduler();
@@ -2884,7 +2973,7 @@ function renderUserManagement(el) {
     <td>${u.access==='admin'?`<span class="badge badge-admin">Admin</span>`:u.access==='management'?`<span class="badge badge-gold">Management</span>`:`<span class="badge badge-medium">Plant User</span>`}</td>
     <td>${u.plant?`<span class="user-plant-badge">${xe(u.plant)}</span>`:'<span style="color:var(--slate);font-size:11px">All</span>'}</td>
     <td style="text-align:right;white-space:nowrap">
-      ${id !== 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="openEditUser('${id}')">Edit</button>` : ''}
+      <button class="btn btn-ghost btn-sm" onclick="openEditUser('${id}')">Edit</button>
       ${id !== currentUser.id && id !== 'admin' ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${id}','${xe(u.name)}')">Delete</button>` : ''}
     </td>
   </tr>`).join('');
@@ -3956,9 +4045,182 @@ function refreshUploadPreview() {
   if (cntEl)  cntEl.textContent  = okCount;
 }
 
-/* ─────────────────────────────────────────────────────────
-   EXECUTE IMPORT
-───────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════
+   IN-APP NOTIFICATION BELL (Admin only)
+   Stored in Firestore: config/appNotifications
+   Each notification: { id, title, meta, visitId, type, time, read }
+══════════════════════════════════════════════════════════ */
+const NOTIF_DOC = db.collection('config').doc('appNotifications');
+let _notifData   = []; // array of notification objects
+let _notifUnsub  = null;
+
+/* Show/hide bell icon based on role */
+function initNotifBell() {
+  const isAdmin = currentUser && currentUser.access === 'admin';
+  const btn = document.getElementById('notifBellBtn');
+  if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
+  if (!isAdmin) return;
+
+  // Start Firestore listener for notifications
+  if (_notifUnsub) _notifUnsub();
+  _notifUnsub = NOTIF_DOC.onSnapshot(doc => {
+    _notifData = (doc.exists && Array.isArray(doc.data().items)) ? doc.data().items : [];
+    renderNotifBadge();
+    renderNotifList();
+  }, err => console.warn('Notif listener error:', err));
+}
+
+function renderNotifBadge() {
+  const unread = _notifData.filter(n => !n.read).length;
+  const badge  = document.getElementById('notifBadge');
+  const btn    = document.getElementById('notifBellBtn');
+  if (!badge || !btn) return;
+  if (unread > 0) {
+    badge.textContent = unread > 99 ? '99+' : unread;
+    badge.classList.add('show');
+    btn.classList.add('has-unread');
+  } else {
+    badge.classList.remove('show');
+    btn.classList.remove('has-unread');
+  }
+}
+
+function renderNotifList() {
+  const list = document.getElementById('notifList');
+  if (!list) return;
+  if (!_notifData.length) {
+    list.innerHTML = '<div class="notif-empty">No notifications yet</div>';
+    return;
+  }
+  // Show newest first, limit to 40
+  const sorted = [..._notifData].sort((a,b) => (b.time||'').localeCompare(a.time||'')).slice(0,40);
+  list.innerHTML = sorted.map(n => `
+    <div class="notif-item ${n.read?'':'unread'}" onclick="notifItemClick('${n.id}','${n.visitId||''}')">
+      <div class="notif-dot"></div>
+      <div class="notif-item-body">
+        <div class="notif-item-title">${xe(n.title||'Notification')}</div>
+        <div class="notif-item-meta">${xe(n.meta||'')} &nbsp;·&nbsp; ${xe(n.time||'')}</div>
+      </div>
+    </div>`).join('');
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  panel.classList.toggle('open');
+  // Close user dropdown if open
+  document.getElementById('userDropdown')?.classList.remove('open');
+  // Mark visible as read when panel opens
+  if (panel.classList.contains('open')) {
+    setTimeout(markAllNotifsRead, 1200);
+  }
+}
+
+function notifItemClick(id, visitId) {
+  // Mark read
+  const idx = _notifData.findIndex(n => n.id === id);
+  if (idx !== -1 && !_notifData[idx].read) {
+    _notifData[idx].read = true;
+    saveNotifData();
+  }
+  // Navigate to visit if visitId provided
+  if (visitId) {
+    document.getElementById('notifPanel')?.classList.remove('open');
+    showTab('records');
+    setTimeout(() => openView(visitId), 300);
+  }
+}
+
+function markAllNotifsRead() {
+  let changed = false;
+  _notifData.forEach(n => { if (!n.read) { n.read = true; changed = true; } });
+  if (changed) { saveNotifData(); renderNotifBadge(); renderNotifList(); }
+}
+
+function clearAllNotifs() {
+  _notifData = [];
+  saveNotifData();
+  renderNotifBadge();
+  renderNotifList();
+}
+
+function saveNotifData() {
+  NOTIF_DOC.set({ items: _notifData.slice(0,200) }).catch(e => console.warn('Notif save error:', e));
+}
+
+/**
+ * pushAdminNotif(title, meta, visitId, type)
+ * Adds a new in-app notification for admins.
+ */
+function pushAdminNotif(title, meta, visitId, type) {
+  if (!currentUser || currentUser.access !== 'admin') return;
+  const notif = {
+    id:      'n' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    title,
+    meta,
+    visitId: visitId || '',
+    type:    type || 'info',
+    time:    new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', hour12:true }),
+    read:    false,
+  };
+  _notifData.unshift(notif);
+  if (_notifData.length > 200) _notifData = _notifData.slice(0, 200);
+  saveNotifData();
+  renderNotifBadge();
+  renderNotifList();
+}
+
+/* Close notif panel when clicking outside */
+document.addEventListener('click', e => {
+  const wrap  = document.getElementById('notifBellWrap');
+  const panel = document.getElementById('notifPanel');
+  if (wrap && panel && panel.classList.contains('open') && !wrap.contains(e.target)) {
+    panel.classList.remove('open');
+  }
+});
+
+/* ══════════════════════════════════════════════════════════
+   FIX: saveNotificationSettings — restart digest scheduler on save
+══════════════════════════════════════════════════════════ */
+const _origSaveNotificationSettings = saveNotificationSettings;
+// Override to restart scheduler after save
+window.saveNotificationSettings = function() {
+  _settingsData.notification = {
+    enableEmail:      document.getElementById('n_enable').value === 'true',
+    ccManagement:     document.getElementById('n_cc').value === 'true',
+    managementEmail:  document.getElementById('n_mgmt_email').value.trim(),
+    subjectPrefix:    document.getElementById('n_prefix').value.trim(),
+  };
+  _settingsData.dailyDigest = {
+    ..._settingsData.dailyDigest,
+    enabled:    document.getElementById('dd_enable').value === 'true',
+    sendTime:   document.getElementById('dd_time').value || '18:00',
+    recipients: document.getElementById('dd_recipients').value.trim(),
+  };
+  saveSettings();
+  // ★ FIX: restart scheduler so new time takes effect immediately
+  stopDailyDigestScheduler();
+  if (_settingsData.dailyDigest.enabled) startDailyDigestScheduler();
+  toast('✓ Notification Config Saved', 'Email notification rules updated. Scheduler restarted.');
+};
+
+/* ══════════════════════════════════════════════════════════
+   FIX: logMail — ensure admin notif is pushed on every create/update
+   AND ensure email respects enableEmail setting
+══════════════════════════════════════════════════════════ */
+const _origLogMail = logMail;
+window.logMail = function(record, isUpdate) {
+  // Always create in-app notification for admin
+  const actionLabel = isUpdate ? '✏ Visit Updated' : '✦ New Visit Scheduled';
+  const notifTitle  = `${actionLabel}: ${record.company}`;
+  const notifMeta   = `${record.plant} · ${fmtDateRange(record.visitDate, record.visitDateEnd)} · ${record.status}`;
+  pushAdminNotif(notifTitle, notifMeta, record.id, isUpdate ? 'update' : 'create');
+
+  // Call original logMail for email + mail log
+  _origLogMail.call(this, record, isUpdate);
+};
+
+
 async function executeUploadImport() {
   const toImport = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
   const skipped  = _uploadRows.filter(r => _uploadSkip.has(r._idx)).length;
