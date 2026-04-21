@@ -2981,9 +2981,48 @@ function saveAppSettings() {
 /* ══════════════════════════════════════════════════════════
    USER MANAGEMENT
 ══════════════════════════════════════════════════════════ */
-function renderUserManagement(el) {
+/* ── User Management state ── */
+let _umSearch   = '';
+let _umRoleFilter = 'all';
+let _umPlantFilter = 'all';
+let _umPage     = 1;
+const UM_PAGE_SIZE = 10;
+
+function renderUserManagement(el, keepState) {
+  if (!keepState) { _umSearch = ''; _umRoleFilter = 'all'; _umPlantFilter = 'all'; _umPage = 1; }
+  _renderUserTable(el);
+}
+
+function _renderUserTable(el) {
+  if (!el) return;
   const users = _usersData;
-  const rows = Object.entries(users).filter(([id, u]) => !u.hidden).map(([id, u]) => `
+  const q = _umSearch.toLowerCase().trim();
+
+  /* All visible users */
+  const allVisible = Object.entries(users).filter(([id, u]) => !u.hidden);
+
+  /* Apply search + filters */
+  const filtered = allVisible.filter(([id, u]) => {
+    const matchQ = !q ||
+      (u.name  || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      id.toLowerCase().includes(q) ||
+      (u.plant || '').toLowerCase().includes(q);
+    const matchRole  = _umRoleFilter  === 'all' || u.access === _umRoleFilter;
+    const matchPlant = _umPlantFilter === 'all' || (u.plant || 'all') === _umPlantFilter;
+    return matchQ && matchRole && matchPlant;
+  });
+
+  /* Pagination */
+  const totalPages = Math.max(1, Math.ceil(filtered.length / UM_PAGE_SIZE));
+  if (_umPage > totalPages) _umPage = totalPages;
+  const paginated = filtered.slice((_umPage - 1) * UM_PAGE_SIZE, _umPage * UM_PAGE_SIZE);
+
+  /* Unique plants for filter dropdown */
+  const plants = [...new Set(allVisible.map(([,u]) => u.plant).filter(Boolean))].sort();
+
+  /* Build rows */
+  const rows = paginated.map(([id, u]) => `
   <tr class="user-table-row">
     <td>
       <div style="display:flex;align-items:center;gap:10px">
@@ -3000,19 +3039,104 @@ function renderUserManagement(el) {
     </td>
   </tr>`).join('');
 
+  const emptyRow = `<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--slate);font-size:13px">
+    ${q||_umRoleFilter!=='all'||_umPlantFilter!=='all' ? '🔍 No users match your search / filters.' : 'No users found.'}
+  </td></tr>`;
+
+  /* Pagination controls */
+  const pageInfo = filtered.length > 0
+    ? `Showing ${(_umPage-1)*UM_PAGE_SIZE+1}–${Math.min(_umPage*UM_PAGE_SIZE, filtered.length)} of ${filtered.length} user${filtered.length!==1?'s':''}`
+    : '0 users';
+
+  const paginationHTML = totalPages > 1 ? `
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--navy3);flex-wrap:wrap;gap:8px">
+    <span style="font-size:12px;color:var(--slate)">${pageInfo}</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="_umGoPage(1)" ${_umPage===1?'disabled':''}>«</button>
+      <button class="btn btn-ghost btn-sm" onclick="_umGoPage(${_umPage-1})" ${_umPage===1?'disabled':''}>‹ Prev</button>
+      ${Array.from({length:totalPages},(_,i)=>i+1).filter(p=>p===1||p===totalPages||Math.abs(p-_umPage)<=1).reduce((acc,p,i,arr)=>{
+        if(i>0&&p-arr[i-1]>1) acc.push('<span style="color:var(--slate);padding:0 4px">…</span>');
+        acc.push(`<button class="btn btn-sm ${p===_umPage?'btn-gold':'btn-ghost'}" onclick="_umGoPage(${p})">${p}</button>`);
+        return acc;
+      },[]).join('')}
+      <button class="btn btn-ghost btn-sm" onclick="_umGoPage(${_umPage+1})" ${_umPage===totalPages?'disabled':''}>Next ›</button>
+      <button class="btn btn-ghost btn-sm" onclick="_umGoPage(${totalPages})" ${_umPage===totalPages?'disabled':''}>»</button>
+    </div>
+  </div>` : `<div style="padding:8px 14px;border-top:1px solid var(--navy3)"><span style="font-size:12px;color:var(--slate)">${pageInfo}</span></div>`;
+
   el.innerHTML = `
   <div class="card">
-    <div class="card-header">
-      <div class="card-title">Users (${Object.entries(users).filter(([id,u])=>!u.hidden).length})</div>
+    <div class="card-header" style="flex-wrap:wrap;gap:10px">
+      <div class="card-title">👥 User Management <span style="font-size:12px;font-weight:400;color:var(--slate);margin-left:6px">(${allVisible.length} total)</span></div>
       <button class="btn btn-gold btn-sm" onclick="openCreateUser()">+ Create User</button>
     </div>
+
+    <!-- Search & Filter Bar -->
+    <div style="display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--navy3);flex-wrap:wrap;align-items:center">
+      <div style="position:relative;flex:1;min-width:200px">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:14px;pointer-events:none">🔍</span>
+        <input
+          type="text"
+          id="um_search_input"
+          placeholder="Search by name, username, email, plant…"
+          value="${xe(_umSearch)}"
+          oninput="_umOnSearch(this.value)"
+          style="width:100%;padding:7px 10px 7px 32px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;box-sizing:border-box"
+        >
+        ${_umSearch ? `<button onclick="_umClearSearch()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--slate);cursor:pointer;font-size:16px;line-height:1">×</button>` : ''}
+      </div>
+      <select onchange="_umSetRole(this.value)" style="padding:7px 10px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;min-width:140px">
+        <option value="all" ${_umRoleFilter==='all'?'selected':''}>All Roles</option>
+        <option value="admin"      ${_umRoleFilter==='admin'?'selected':''}>Admin</option>
+        <option value="management" ${_umRoleFilter==='management'?'selected':''}>Management</option>
+        <option value="plant"      ${_umRoleFilter==='plant'?'selected':''}>Plant User</option>
+      </select>
+      <select onchange="_umSetPlant(this.value)" style="padding:7px 10px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;min-width:140px">
+        <option value="all" ${_umPlantFilter==='all'?'selected':''}>All Plants</option>
+        ${plants.map(p=>`<option value="${xe(p)}" ${_umPlantFilter===p?'selected':''}>${xe(p)}</option>`).join('')}
+      </select>
+      ${(_umSearch||_umRoleFilter!=='all'||_umPlantFilter!=='all') ? `<button class="btn btn-ghost btn-sm" onclick="_umClearAll()">✕ Clear</button>` : ''}
+    </div>
+
     <div class="table-wrap">
       <table>
         <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Plant Access</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows || emptyRow}</tbody>
       </table>
     </div>
+    ${paginationHTML}
   </div>`;
+
+  /* Re-focus search input if user was typing */
+  if (_umSearch) {
+    const inp = document.getElementById('um_search_input');
+    if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  }
+}
+
+function _umGoPage(p) {
+  _umPage = p;
+  _renderUserTable(document.getElementById('settingsContent'));
+}
+function _umOnSearch(v) {
+  _umSearch = v; _umPage = 1;
+  _renderUserTable(document.getElementById('settingsContent'));
+}
+function _umClearSearch() {
+  _umSearch = ''; _umPage = 1;
+  _renderUserTable(document.getElementById('settingsContent'));
+}
+function _umSetRole(v) {
+  _umRoleFilter = v; _umPage = 1;
+  _renderUserTable(document.getElementById('settingsContent'));
+}
+function _umSetPlant(v) {
+  _umPlantFilter = v; _umPage = 1;
+  _renderUserTable(document.getElementById('settingsContent'));
+}
+function _umClearAll() {
+  _umSearch = ''; _umRoleFilter = 'all'; _umPlantFilter = 'all'; _umPage = 1;
+  _renderUserTable(document.getElementById('settingsContent'));
 }
 
 function openCreateUser() {
@@ -3099,7 +3223,7 @@ function saveUser(editId) {
   toast(isEdit?'✓ User Updated':'✦ User Created', `${name} — user account ${isEdit?'updated':'created'}.`);
   // Re-render settings tab
   const el = document.getElementById('settingsContent');
-  if (el) renderUserManagement(el);
+  if (el) renderUserManagement(el, true);
 }
 
 function deleteUser(id, name) {
@@ -3108,7 +3232,7 @@ function deleteUser(id, name) {
   saveUsers();
   toast('Deleted', name+' user account removed.');
   const el = document.getElementById('settingsContent');
-  if (el) renderUserManagement(el);
+  if (el) renderUserManagement(el, true);
 }
 
 /* ══════════════════════════════════════════════════════════
