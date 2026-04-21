@@ -1048,20 +1048,45 @@ function saveMail(mails) {
   _mailData = mails;
   MAIL_DOC.set({ logs: mails }).catch(e => console.error(e));
 }
-let _usersSaving = false;  // write-lock: prevents onSnapshot from overwriting during save
-function saveUsers() {
-  _usersSaving = true;
-  // Also persist to localStorage as backup
-  try { localStorage.setItem('_appUsersCache', JSON.stringify(_usersData)); } catch(e) {}
-  USERS_DOC.set({ users: _usersData })
-    .then(() => { setTimeout(() => { _usersSaving = false; }, 4000); })
-    .catch(e => { console.error('saveUsers failed:', e); _usersSaving = false; });
+// Tracks which DEFAULT_USER keys have been explicitly deleted
+let _deletedDefaultUsers = JSON.parse(localStorage.getItem('pv_deleted_defaults') || '[]');
+
+function _persistUsers() {
+  // Save full user map + deletion list to localStorage (instant, no network)
+  const customOnly = {};
+  Object.entries(_usersData).forEach(([id, u]) => {
+    if (!DEFAULT_USERS[id]) customOnly[id] = u;   // only custom users
+  });
+  localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
+  localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+
+  // Also push full map to Firestore
+  USERS_DOC.set({ users: _usersData, deletedDefaults: _deletedDefaultUsers })
+    .catch(e => console.error('saveUsers Firestore error:', e));
+}
+
+function saveUsers() { _persistUsers(); }
+
+// Load custom users + deletion list from localStorage into _usersData on boot
+function _loadLocalUsers() {
+  try {
+    const custom  = JSON.parse(localStorage.getItem('pv_users_custom') || '{}');
+    const deleted = JSON.parse(localStorage.getItem('pv_deleted_defaults') || '[]');
+    _deletedDefaultUsers = deleted;
+    // Start from DEFAULT_USERS minus any explicitly deleted ones
+    const base = {};
+    Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
+      if (!deleted.includes(id)) base[id] = u;
+    });
+    _usersData = { ...base, ...custom };
+  } catch(e) {}
 }
 function saveSettings() {
   SETTINGS_DOC.set(_settingsData).catch(e => console.error(e));
 }
 
 function initFirestoreListeners() {
+  _loadLocalUsers();  // restore custom users + deletions from localStorage immediately
   db.collection(VISITS_COL).orderBy('createdAt','asc').onSnapshot(snapshot => {
     setFbStatus('live');
     startSyncClock();
@@ -1086,27 +1111,29 @@ function initFirestoreListeners() {
   }, e => console.error(e));
 
   USERS_DOC.onSnapshot(doc => {
-    if (_usersSaving) return; // skip — our own write triggered this snapshot
     if (doc.exists && doc.data().users) {
-      // Merge Firestore users on top of DEFAULT_USERS, but always preserve
-      // DEFAULT_USERS passwords/access for built-in accounts so login works
       const firestoreUsers = doc.data().users;
-      const merged = { ...DEFAULT_USERS, ...firestoreUsers };
-      // Re-apply DEFAULT_USERS credentials for built-in accounts to prevent lockout
+      // Sync deletion list from Firestore
+      const fsDeleted = doc.data().deletedDefaults || [];
+      fsDeleted.forEach(id => { if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id); });
+      localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+
+      // Build base: DEFAULT_USERS minus deleted ones
+      const base = {};
+      Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
+        if (!_deletedDefaultUsers.includes(id)) base[id] = u;
+      });
+      // Merge Firestore users on top — but only re-apply credentials for non-deleted defaults
+      const merged = { ...base, ...firestoreUsers };
+      // Remove any user that was explicitly deleted
+      _deletedDefaultUsers.forEach(id => { delete merged[id]; });
+      // Restore original passwords/access for remaining default accounts (prevent lockout)
       Object.keys(DEFAULT_USERS).forEach(key => {
-        if (merged[key]) {
+        if (merged[key] && !_deletedDefaultUsers.includes(key)) {
           merged[key] = { ...merged[key], password: DEFAULT_USERS[key].password, access: DEFAULT_USERS[key].access, hidden: DEFAULT_USERS[key].hidden };
         }
       });
       _usersData = merged;
-      // Refresh User Management panel if currently open
-      if (_appReady) {
-        const settEl = document.getElementById('settingsContent');
-        const activeTab = document.querySelector('.settings-tab.active');
-        if (settEl && activeTab && activeTab.textContent.includes('User')) {
-          renderUserManagement(settEl);
-        }
-      }
     }
   }, e => console.error(e));
 
@@ -2027,9 +2054,14 @@ function saveVisitFromModal(editId) {
 
 function closeModal() {
   document.getElementById('overlay').classList.remove('open');
-  document.getElementById('modalBox').classList.remove('modal-sm');
-  // Clear body so stale form state never bleeds into next open
-  setTimeout(() => { const mb = document.getElementById('modalBody'); if (mb) mb.innerHTML = ''; }, 200);
+  const mb = document.getElementById('modalBox');
+  mb.classList.remove('modal-sm');
+  mb.classList.remove('modal-lg');
+  // Delay clear so any pending onclick handlers finish first
+  setTimeout(() => {
+    const body = document.getElementById('modalBody');
+    if (body) body.innerHTML = '';
+  }, 150);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2998,44 +3030,37 @@ function saveAppSettings() {
 /* ══════════════════════════════════════════════════════════
    USER MANAGEMENT
 ══════════════════════════════════════════════════════════ */
-/* ── User Management: search / filter / pagination state ── */
+/* ── User Management UI state ── */
 let _umQ = '', _umRole = 'all', _umPlant = 'all', _umPage = 1;
-const _UM_PER_PAGE = 15;
+const _UM_PER = 15;
 
-function renderUserManagement(el, keepFilters) {
-  if (!keepFilters) { _umQ = ''; _umRole = 'all'; _umPlant = 'all'; _umPage = 1; }
+function renderUserManagement(el, keep) {
+  if (!keep) { _umQ=''; _umRole='all'; _umPlant='all'; _umPage=1; }
   _umDraw(el);
 }
 
 function _umDraw(el) {
   if (!el) return;
   const all = Object.entries(_usersData).filter(([,u]) => !u.hidden);
-
-  // Filter
   const q = _umQ.trim().toLowerCase();
-  const filtered = all.filter(([id, u]) => {
-    if (q && !((u.name||'')+u.email+(u.plant||'')+id).toLowerCase().includes(q)) return false;
+  const filt = all.filter(([id,u]) => {
+    if (q && !((u.name||'')+' '+(u.email||'')+' '+id+' '+(u.plant||'')).toLowerCase().includes(q)) return false;
     if (_umRole  !== 'all' && u.access !== _umRole)  return false;
-    if (_umPlant !== 'all' && (u.plant||'none') !== _umPlant) return false;
+    if (_umPlant !== 'all' && (u.plant||'all') !== _umPlant) return false;
     return true;
   });
-
-  // Paginate
-  const pages = Math.max(1, Math.ceil(filtered.length / _UM_PER_PAGE));
-  if (_umPage > pages) _umPage = pages;
-  const slice = filtered.slice((_umPage-1)*_UM_PER_PAGE, _umPage*_UM_PER_PAGE);
-
-  // Plants dropdown list
+  const pages = Math.max(1, Math.ceil(filt.length/_UM_PER));
+  if (_umPage>pages) _umPage=pages;
+  const slice = filt.slice((_umPage-1)*_UM_PER, _umPage*_UM_PER);
   const plantOpts = [...new Set(all.map(([,u])=>u.plant).filter(Boolean))].sort()
     .map(p=>`<option value="${p}" ${_umPlant===p?'selected':''} >${p}</option>`).join('');
 
-  // Rows
-  const rows = slice.length ? slice.map(([id,u]) => `
+  const rows = slice.length ? slice.map(([id,u])=>`
     <tr class="user-table-row">
       <td><div style="display:flex;align-items:center;gap:10px">
         <div class="user-avatar" style="cursor:default;font-size:11px">${u.initials||id.slice(0,2).toUpperCase()}</div>
         <div><div style="font-weight:500;color:var(--white);font-size:13px">${xe(u.name)}</div>
-             <div style="font-size:11px;color:var(--slate)">${xe(u.email||'')} </div></div>
+          <div style="font-size:11px;color:var(--slate)">${xe(u.email||'')}</div></div>
       </div></td>
       <td><code style="font-size:11px;background:var(--navy4);padding:2px 8px;border-radius:4px">${xe(id)}</code></td>
       <td>${u.access==='admin'?'<span class="badge badge-admin">Admin</span>':u.access==='management'?'<span class="badge badge-gold">Management</span>':'<span class="badge badge-medium">Plant User</span>'}</td>
@@ -3045,72 +3070,53 @@ function _umDraw(el) {
         ${id!==currentUser.id&&id!=='admin'?`<button class="btn btn-danger btn-sm" onclick="deleteUser('${id}','${xe(u.name)}')">Delete</button>`:''}
       </td>
     </tr>`).join('')
-  : `<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--slate);font-size:13px">${q||_umRole!=='all'||_umPlant!=='all'?'No users match your search.':'No users found.'}</td></tr>`;
+  : `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--slate);font-size:13px">${q||_umRole!=='all'||_umPlant!=='all'?'No users match your search.':'No users found.'}</td></tr>`;
 
-  // Pagination bar
-  let pgBar = '';
-  if (pages > 1) {
-    const btns = Array.from({length:pages},(_,i)=>i+1)
-      .filter(p=>p===1||p===pages||Math.abs(p-_umPage)<=1)
-      .reduce((acc,p,i,arr)=>{
-        if(i>0&&p-arr[i-1]>1) acc+='<span style="color:var(--slate);padding:0 2px">…</span>';
-        acc+=`<button class="btn btn-sm ${p===_umPage?'btn-gold':'btn-ghost'}" onclick="_umPage=${p};_umDraw(document.getElementById('settingsContent'))">${p}</button>`;
-        return acc;
-      },'');
-    pgBar = `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--navy3);flex-wrap:wrap;gap:6px">
-      <span style="font-size:12px;color:var(--slate)">Showing ${(_umPage-1)*_UM_PER_PAGE+1}–${Math.min(_umPage*_UM_PER_PAGE,filtered.length)} of ${filtered.length}</span>
-      <div style="display:flex;gap:4px">
-        <button class="btn btn-ghost btn-sm" onclick="_umPage=Math.max(1,_umPage-1);_umDraw(document.getElementById('settingsContent'))" ${_umPage===1?'disabled':''}>‹</button>
-        ${btns}
-        <button class="btn btn-ghost btn-sm" onclick="_umPage=Math.min(${pages},_umPage+1);_umDraw(document.getElementById('settingsContent'))" ${_umPage===pages?'disabled':''}>›</button>
-      </div></div>`;
-  } else if (filtered.length > 0) {
-    pgBar = `<div style="padding:8px 14px;border-top:1px solid var(--navy3)"><span style="font-size:12px;color:var(--slate)">${filtered.length} user${filtered.length!==1?'s':''}</span></div>`;
-  }
+  const pgBar = pages>1 ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--navy3);flex-wrap:wrap;gap:6px">
+    <span style="font-size:12px;color:var(--slate)">Showing ${(_umPage-1)*_UM_PER+1}–${Math.min(_umPage*_UM_PER,filt.length)} of ${filt.length}</span>
+    <div style="display:flex;gap:4px">
+      <button class="btn btn-ghost btn-sm" onclick="_umPage=Math.max(1,_umPage-1);_umDraw(document.getElementById('settingsContent'))" ${_umPage===1?'disabled':''}>‹</button>
+      ${Array.from({length:pages},(_,i)=>i+1).filter(p=>p===1||p===pages||Math.abs(p-_umPage)<=1)
+        .reduce((a,p,i,arr)=>{if(i>0&&p-arr[i-1]>1)a+='…';a+=`<button class="btn btn-sm ${p===_umPage?'btn-gold':'btn-ghost'}" onclick="_umPage=${p};_umDraw(document.getElementById('settingsContent'))">${p}</button>`;return a;},'')}
+      <button class="btn btn-ghost btn-sm" onclick="_umPage=Math.min(${pages},_umPage+1);_umDraw(document.getElementById('settingsContent'))" ${_umPage===pages?'disabled':''}>›</button>
+    </div></div>`
+  : `<div style="padding:8px 14px;border-top:1px solid var(--navy3)"><span style="font-size:12px;color:var(--slate)">${filt.length} user${filt.length!==1?'s':''}</span></div>`;
 
-  el.innerHTML = `
-  <div class="card">
+  el.innerHTML = `<div class="card">
     <div class="card-header" style="flex-wrap:wrap;gap:8px">
       <div class="card-title">👥 Users <span style="font-size:12px;font-weight:400;color:var(--slate);margin-left:4px">(${all.length} total)</span></div>
       <button class="btn btn-gold btn-sm" onclick="openCreateUser()">+ Create User</button>
     </div>
     <div style="display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--navy3);flex-wrap:wrap;align-items:center">
-      <div style="position:relative;flex:1;min-width:180px">
-        <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:13px;pointer-events:none">🔍</span>
+      <div style="position:relative;flex:1;min-width:160px">
+        <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none">🔍</span>
         <input type="text" id="um_q" placeholder="Search name, username, email, plant…" value="${xe(_umQ)}"
           oninput="_umQ=this.value;_umPage=1;_umDraw(document.getElementById('settingsContent'))"
-          style="width:100%;padding:7px 10px 7px 30px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;box-sizing:border-box">
-        ${_umQ?`<button onclick="_umQ='';_umPage=1;_umDraw(document.getElementById('settingsContent'))" style="position:absolute;right:7px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--slate);cursor:pointer;font-size:17px">×</button>`:''}</div>
+          style="width:100%;padding:7px 10px 7px 28px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;box-sizing:border-box">
+        ${_umQ?`<button onclick="_umQ='';_umPage=1;_umDraw(document.getElementById('settingsContent'))" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--slate);cursor:pointer;font-size:16px">×</button>`:''}</div>
       <select onchange="_umRole=this.value;_umPage=1;_umDraw(document.getElementById('settingsContent'))"
-        style="padding:7px 10px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;min-width:125px">
+        style="padding:7px 10px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;min-width:120px">
         <option value="all" ${_umRole==='all'?'selected':''}>All Roles</option>
         <option value="admin" ${_umRole==='admin'?'selected':''}>Admin</option>
         <option value="management" ${_umRole==='management'?'selected':''}>Management</option>
         <option value="plant" ${_umRole==='plant'?'selected':''}>Plant User</option>
       </select>
       <select onchange="_umPlant=this.value;_umPage=1;_umDraw(document.getElementById('settingsContent'))"
-        style="padding:7px 10px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;min-width:125px">
-        <option value="all" ${_umPlant==='all'?'selected':''}>All Plants</option>
-        ${plantOpts}
+        style="padding:7px 10px;background:var(--navy4);border:1px solid var(--navy3);border-radius:6px;color:var(--white);font-size:13px;min-width:120px">
+        <option value="all" ${_umPlant==='all'?'selected':''}>All Plants</option>${plantOpts}
       </select>
-      ${(q||_umRole!=='all'||_umPlant!=='all')?`<button class="btn btn-ghost btn-sm" onclick="_umQ='';_umRole='all';_umPlant='all';_umPage=1;_umDraw(document.getElementById('settingsContent'))">✕ Clear</button>`:''}
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Plant Access</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    ${pgBar}
-  </div>`;
-
-  // Re-focus search if user was typing
-  if (_umQ) { const inp=document.getElementById('um_q'); if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);} }
+      ${(q||_umRole!=='all'||_umPlant!=='all')?`<button class="btn btn-ghost btn-sm" onclick="_umQ='';_umRole='all';_umPlant='all';_umPage=1;_umDraw(document.getElementById('settingsContent'))">✕ Clear</button>`:''}</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Plant Access</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${pgBar}</div>`;
+  if(_umQ){const i=document.getElementById('um_q');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
 }
 
 function openCreateUser() {
   const box = document.getElementById('modalBox');
-  box.classList.remove('modal-sm');   // reset first in case stale
+  // Clear any previous size class and set fresh
+  ['modal-sm','modal-lg','modal-xl'].forEach(cls => box.classList.remove(cls));
   box.classList.add('modal-sm');
   document.getElementById('modalTitle').textContent = '✦ Create New User';
   document.getElementById('modalBody').innerHTML = userForm(null, null);
@@ -3183,28 +3189,35 @@ function saveUser(editId) {
   if (!isEdit && pass.length < 6) { errEl.textContent='Password must be at least 6 characters.'; errEl.classList.add('show'); return; }
 
   const existing = isEdit ? (_usersData[editId]||{}) : {};
-  // Build the new user object and write it synchronously into _usersData
-  const newUserObj = {
+  _usersData[idVal] = {
     ...existing,
     name, initials, email, access,
     plant: plant || null,
     role: access==='admin'?'Administrator':access==='management'?'Top Management':'Plant User',
     password: (pass.length>=6) ? pass : (existing.password||''),
   };
-  _usersData[idVal] = newUserObj;
-  saveUsers();   // sets _usersSaving=true, writes to Firestore + localStorage
-  closeModal();
-  toast(isEdit?'✓ User Updated':'✦ User Created', `${name} — account ${isEdit?'updated':'created'} successfully.`);
-  // Re-render immediately from in-memory _usersData (already has the new user)
+  // Close modal first — prevents overlay click race
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('modalBox').classList.remove('modal-sm');
+
+  saveUsers();
+  toast(isEdit?'✓ User Updated':'✦ User Created', `${name} account ${isEdit?'updated':'created'} successfully.`);
   const el = document.getElementById('settingsContent');
   if (el) renderUserManagement(el);
 }
 
 function deleteUser(id, name) {
-  if (!confirm(`Delete user "${name}" (${id})?\n\nThis action cannot be undone.`)) return;
+  if (!confirm(`Delete user "${name}" (${id})?
+
+This action cannot be undone.`)) return;
+  // If this is a default user, record the deletion so onSnapshot won't restore it
+  if (DEFAULT_USERS[id]) {
+    if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id);
+    localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+  }
   delete _usersData[id];
   saveUsers();
-  toast('Deleted', name+' user account removed.');
+  toast('✓ Deleted', name + ' removed successfully.');
   const el = document.getElementById('settingsContent');
   if (el) renderUserManagement(el);
 }
