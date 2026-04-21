@@ -1412,7 +1412,12 @@ function updateBadges() {
 function getVisible() {
   const visits = loadVisits();
   if (!currentUser || currentUser.access !== 'plant') return visits;
-  return visits.filter(v => v.plant === currentUser.plant);
+  // Support both multi-plant (plants array) and legacy single plant
+  const userPlants = Array.isArray(currentUser.plants) && currentUser.plants.length
+    ? currentUser.plants
+    : (currentUser.plant ? [currentUser.plant] : []);
+  if (!userPlants.length) return visits;
+  return visits.filter(v => userPlants.includes(v.plant));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1500,14 +1505,22 @@ function renderDashboard(el) {
 
   <div class="section-header">
     <div class="section-title">Command Centre</div>
-    <div class="section-sub">${currentUser.access === 'plant' ? currentUser.plant + ' plant' : 'All plants'} · ${total} total records</div>
+    <div class="section-sub">${(()=>{
+      if (currentUser.access !== 'plant') return 'All plants';
+      const ups = Array.isArray(currentUser.plants) && currentUser.plants.length ? currentUser.plants : (currentUser.plant ? [currentUser.plant] : []);
+      return (ups.length ? ups.join(', ') : 'All') + ' plant' + (ups.length > 1 ? 's' : '');
+    })()} · ${total} total records</div>
   </div>
 
   <div class="metric-grid">
     <div class="metric metric-clickable" style="--metric-accent:#e8c547" onclick="navToRecords()" title="View all records">
       <div class="metric-label">Total Visits</div>
       <div class="metric-value">${total}</div>
-      <div class="metric-sub">${currentUser.access==='plant'?currentUser.plant:'All Plants'} <span class="metric-arrow">→</span></div>
+      <div class="metric-sub">${(()=>{
+        if (currentUser.access !== 'plant') return 'All Plants';
+        const ups = Array.isArray(currentUser.plants) && currentUser.plants.length ? currentUser.plants : (currentUser.plant ? [currentUser.plant] : []);
+        return ups.length > 1 ? ups.join(' / ') : (ups[0] || 'All Plants');
+      })()} <span class="metric-arrow">→</span></div>
     </div>
     <div class="metric metric-clickable" style="--metric-accent:#4a90e2" onclick="navToRecords('','Scheduled')" title="View scheduled visits">
       <div class="metric-label">Upcoming</div>
@@ -1692,9 +1705,18 @@ function buildTable(visits, actions) {
    FORM
 ══════════════════════════════════════════════════════════ */
 function renderForm(el, data) {
-  const d = data || { plant:currentUser.plant||'Pune', stay:'N', criticality:'Medium', category:'Business Development', status:'Scheduled' };
+  const _defaultPlant = (()=>{
+    if (currentUser.access !== 'plant') return PLANTS[0];
+    if (Array.isArray(currentUser.plants) && currentUser.plants.length) return currentUser.plants[0];
+    return currentUser.plant || PLANTS[0];
+  })();
+  const d = data || { plant:_defaultPlant, stay:'N', criticality:'Medium', category:'Business Development', status:'Scheduled' };
   const isEdit = !!data;
-  const plantDisabled = currentUser.access==='plant' ? 'disabled' : '';
+  const _userPlants = currentUser.access === 'plant'
+    ? (Array.isArray(currentUser.plants) && currentUser.plants.length ? currentUser.plants : (currentUser.plant ? [currentUser.plant] : []))
+    : PLANTS;
+  // Disable plant select only if user has exactly 1 assigned plant (no choice)
+  const plantDisabled = (currentUser.access==='plant' && _userPlants.length <= 1) ? 'disabled' : '';
   el.innerHTML = `
   <div class="form-panel">
     <div class="form-panel-title">${isEdit?'Edit Visit Record':'New Customer Visit'}<span>${isEdit?'Updating · '+xe(d.company):'Entry Form'}</span></div>
@@ -1703,7 +1725,12 @@ function renderForm(el, data) {
       <div class="fg"><label>Confirmation Date <span class="req">*</span></label><input type="date" id="f_confirmDate" value="${d.confirmDate||''}"></div>
       <div class="fg"><label>Visit Date — From <span class="req">*</span></label><input type="date" id="f_visitDate" value="${d.visitDate||''}" onchange="validateVisitDateRange()"></div>
       <div class="fg"><label>Visit Date — To <span style="font-size:10px;color:var(--slate);font-weight:400">(optional, multi-day)</span></label><input type="date" id="f_visitDateEnd" value="${d.visitDateEnd||''}" onchange="validateVisitDateRange()"></div>
-      <div class="fg"><label>Plant <span class="req">*</span></label><select id="f_plant" ${plantDisabled}>${PLANTS.map(p=>`<option${d.plant===p?' selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="fg"><label>Plant <span class="req">*</span></label><select id="f_plant" ${plantDisabled}>${(()=>{
+        const userPlants = currentUser.access === 'plant'
+          ? (Array.isArray(currentUser.plants) && currentUser.plants.length ? currentUser.plants : (currentUser.plant ? [currentUser.plant] : PLANTS))
+          : PLANTS;
+        return userPlants.map(p=>`<option${d.plant===p?' selected':''}>${p}</option>`).join('');
+      })()}</select></div>
     </div>
     <div class="form-grid" style="margin-top:16px">
       <div class="form-section-label">Visitor Information</div>
@@ -1784,7 +1811,12 @@ function collectForm() {
   }
   const _vdStart = v('f_visitDate'), _vdEnd = v('f_visitDateEnd');
   if (_vdEnd && _vdEnd < _vdStart) { toast('Invalid Date Range',"Visit 'To' date cannot be before 'From' date.",true); document.getElementById('f_visitDateEnd')?.focus(); return null; }
-  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:currentUser.access==='plant'?currentUser.plant:v('f_plant'), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), meetingRoom:v('f_meetingRoom').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
+  return { confirmDate:v('f_confirmDate'), visitDate:v('f_visitDate'), visitDateEnd:v('f_visitDateEnd')||'', plant:(()=>{
+    if (currentUser.access !== 'plant') return v('f_plant');
+    const userPlants = Array.isArray(currentUser.plants) && currentUser.plants.length ? currentUser.plants : (currentUser.plant ? [currentUser.plant] : []);
+    // If only one plant assigned, use it directly; otherwise use the dropdown selection
+    return userPlants.length === 1 ? userPlants[0] : v('f_plant');
+  })(), company:v('f_company').trim(), rep:v('f_rep').trim(), category:v('f_category'), criticality:v('f_criticality'), focus:v('f_focus').trim(), coordinator:v('f_coordinator').trim(), agenda:v('f_agenda').trim(), attendees:v('f_attendees').trim(), meetingRoom:v('f_meetingRoom').trim(), stay:v('f_stay'), hotel:v('f_hotel').trim(), remarks:v('f_remarks').trim(), status:v('f_status') };
 }
 
 function saveVisit(editId) {
@@ -3068,16 +3100,22 @@ function _umDraw(el) {
   const all = Object.entries(_usersData).filter(([,u]) => !u.hidden);
   const q = _umQ.trim().toLowerCase();
   const filt = all.filter(([id,u]) => {
-    if (q && !((u.name||'')+' '+(u.email||'')+' '+id+' '+(u.plant||'')).toLowerCase().includes(q)) return false;
+    const plantStr = Array.isArray(u.plants) && u.plants.length ? u.plants.join(' ') : (u.plant||'');
+    if (q && !((u.name||'')+' '+(u.email||'')+' '+id+' '+plantStr).toLowerCase().includes(q)) return false;
     if (_umRole  !== 'all' && u.access !== _umRole)  return false;
-    if (_umPlant !== 'all' && (u.plant||'all') !== _umPlant) return false;
+    if (_umPlant !== 'all') {
+      const userPlants = Array.isArray(u.plants) && u.plants.length ? u.plants : (u.plant ? [u.plant] : []);
+      if (!userPlants.includes(_umPlant)) return false;
+    }
     return true;
   });
   const pages = Math.max(1, Math.ceil(filt.length/_UM_PER));
   if (_umPage>pages) _umPage=pages;
   const slice = filt.slice((_umPage-1)*_UM_PER, _umPage*_UM_PER);
-  const plantOpts = [...new Set(all.map(([,u])=>u.plant).filter(Boolean))].sort()
-    .map(p=>`<option value="${p}" ${_umPlant===p?'selected':''} >${p}</option>`).join('');
+  const plantOpts = [...new Set(all.flatMap(([,u])=>{
+    if (Array.isArray(u.plants) && u.plants.length) return u.plants;
+    return u.plant ? [u.plant] : [];
+  }))].sort().map(p=>`<option value="${p}" ${_umPlant===p?'selected':''} >${p}</option>`).join('');
 
   const rows = slice.length ? slice.map(([id,u])=>`
     <tr class="user-table-row">
@@ -3088,7 +3126,10 @@ function _umDraw(el) {
       </div></td>
       <td><code style="font-size:11px;background:var(--navy4);padding:2px 8px;border-radius:4px">${xe(id)}</code></td>
       <td>${u.access==='admin'?'<span class="badge badge-admin">Admin</span>':u.access==='management'?'<span class="badge badge-gold">Management</span>':'<span class="badge badge-medium">Plant User</span>'}</td>
-      <td>${u.plant?`<span class="user-plant-badge">${xe(u.plant)}</span>`:`<span style="color:var(--slate);font-size:11px">All</span>`}</td>
+      <td>${(()=>{
+        const plants = Array.isArray(u.plants) && u.plants.length ? u.plants : (u.plant ? [u.plant] : []);
+        return plants.length ? plants.map(p=>`<span class="user-plant-badge" style="margin-right:3px">${xe(p)}</span>`).join('') : `<span style="color:var(--slate);font-size:11px">All</span>`;
+      })()}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn btn-ghost btn-sm" onclick="openEditUser('${id}')">Edit</button>
         ${id!==currentUser.id&&id!=='admin'?`<button class="btn btn-danger btn-sm" onclick="deleteUser('${id}','${xe(u.name)}')">Delete</button>`:''}
@@ -3180,8 +3221,16 @@ function userForm(id, u) {
       </select>
     </div>
     <div class="fg" id="uf_plant_wrap" style="${(u?.access==='plant'||!u)?'':'display:none'}">
-      <label>Plant <span class="req">*</span></label>
-      <select id="uf_plant">${PLANTS.map(p=>`<option${u?.plant===p?' selected':''}>${p}</option>`).join('')}</select>
+      <label>Plants <span class="req">*</span> <span style="font-size:10px;color:var(--slate);font-weight:400">(select one or more)</span></label>
+      <div id="uf_plant_checks" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;padding:10px 12px;background:var(--navy3);border:1px solid var(--border);border-radius:var(--radius)">
+        ${(()=>{
+          const sel = Array.isArray(u?.plants) && u.plants.length ? u.plants : (u?.plant ? [u.plant] : []);
+          return PLANTS.map(p=>`
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:400;color:var(--white2);white-space:nowrap">
+              <input type="checkbox" name="uf_plant_cb" value="${p}" ${sel.includes(p)?'checked':''} style="accent-color:var(--gold);width:14px;height:14px"> ${p}
+            </label>`).join('');
+        })()}
+      </div>
     </div>
     <div class="fg"><label>Password <span class="req">${isEdit?'(leave blank to keep)':'*'}</span></label><input type="password" id="uf_pass" placeholder="${isEdit?'New password (optional)':'Set a password'}"></div>
     <div class="fg" style="grid-column:1/-1">
@@ -3207,7 +3256,10 @@ function saveUser(editId) {
   const initials= (document.getElementById('uf_initials')?.value||'').trim().toUpperCase() || name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   const email   = (document.getElementById('uf_email')?.value||'').trim();
   const access  = document.getElementById('uf_access')?.value || 'plant';
-  const plant   = access === 'plant' ? (document.getElementById('uf_plant')?.value||PLANTS[0]) : null;
+  const plants  = access === 'plant'
+    ? Array.from(document.querySelectorAll('input[name="uf_plant_cb"]:checked')).map(cb => cb.value)
+    : [];
+  const plant   = plants.length === 1 ? plants[0] : (plants[0] || null); // backward-compat single
   const pass    = (document.getElementById('uf_pass')?.value||'').trim();
   const errEl   = document.getElementById('uf_err');
   errEl.classList.remove('show'); errEl.textContent='';
@@ -3216,12 +3268,14 @@ function saveUser(editId) {
   if (!isEdit && !idVal) { errEl.textContent='Username is required.'; errEl.classList.add('show'); return; }
   if (!isEdit && _usersData[idVal]) { errEl.textContent='Username already exists.'; errEl.classList.add('show'); return; }
   if (!isEdit && pass.length < 6) { errEl.textContent='Password must be at least 6 characters.'; errEl.classList.add('show'); return; }
+  if (access === 'plant' && plants.length === 0) { errEl.textContent='Please select at least one plant.'; errEl.classList.add('show'); return; }
 
   const existing = isEdit ? (_usersData[editId]||{}) : {};
   _usersData[idVal] = {
     ...existing,
     name, initials, email, access,
-    plant: plant || null,
+    plant: plant || null,           // keep for backward compat (first plant)
+    plants: plants.length ? plants : null,  // new multi-plant array
     role: access==='admin'?'Administrator':access==='management'?'Top Management':'Plant User',
     password: (pass.length>=6) ? pass : (existing.password||''),
   };
@@ -3264,7 +3318,7 @@ function exportUsersCSV() {
     u.initials || '',
     u.email || '',
     u.access === 'admin' ? 'Administrator' : u.access === 'management' ? 'Top Management' : 'Plant User',
-    u.plant || 'All Plants',
+    (Array.isArray(u.plants) && u.plants.length ? u.plants.join(';') : (u.plant || 'All Plants')),
   ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');
   const a = document.createElement('a');
@@ -3296,7 +3350,7 @@ function exportUsersPDF() {
       </td>
       <td style="font-size:11px;color:#555"><code style="background:#f4f4fb;padding:2px 8px;border-radius:4px;font-size:11px">${id}</code></td>
       <td><span style="background:${rc}20;color:${rc};border:1px solid ${rc}55;border-radius:50px;padding:2px 10px;font-size:10px;font-weight:600;white-space:nowrap">${roleLabel}</span></td>
-      <td style="font-size:11px;color:#555">${u.plant || '<span style="color:#aaa">All Plants</span>'}</td>
+      <td style="font-size:11px;color:#555">${(Array.isArray(u.plants) && u.plants.length ? u.plants.join(', ') : (u.plant || '')) || '<span style="color:#aaa">All Plants</span>'}</td>
     </tr>`;
   }).join('');
 
@@ -3407,7 +3461,7 @@ function renderUserUploadPhase1() {
     </div>
     <div style="margin-top:8px;font-size:11px;color:var(--slate)">
       <strong style="color:var(--slate2)">role</strong> accepts: <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">admin</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">management</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">plant</code> &nbsp;·&nbsp;
-      <strong style="color:var(--slate2)">plant</strong> required when role=plant
+      <strong style="color:var(--slate2)">plant</strong> required when role=plant — use <strong style="color:var(--gold)">semicolons</strong> for multiple plants (e.g. <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">Pune;Chennai</code>)
     </div>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
@@ -3420,6 +3474,7 @@ function downloadUserTemplate() {
   const header = USER_UPLOAD_COLS.join(',');
   const example = [
     ['ramu_pune','Ramesh Kumar','RK','ramu@company.com','plant','Pune','plant@2025'],
+    ['suresh_multi','Suresh Patel','SP','suresh@company.com','plant','Pune;Chennai','plant@2025'],
     ['priya_mgmt','Priya Sharma','PS','priya@company.com','management','','mgmt@2025'],
   ].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
   const a = document.createElement('a');
@@ -3477,11 +3532,17 @@ function parseUserUploadCSV(text) {
     if (!r.password || r.password.length < 6) r._errors.push('Password must be ≥6 chars');
     if (!USER_ROLES_VALID.includes(r.role)) r._errors.push('Role must be: admin, management, or plant');
     if (r.role === 'plant' && !r.plant) r._errors.push('Plant is required for role=plant');
-    // Case-insensitive plant match — also normalise to canonical casing
+    // Case-insensitive plant match — also normalise to canonical casing; supports semicolon-separated multi-plant
     if (r.role === 'plant' && r.plant) {
-      const matchedPlant = PLANTS.find(p => p.toLowerCase() === r.plant.toLowerCase());
-      if (!matchedPlant) r._errors.push('Plant "' + r.plant + '" not found. Available: ' + PLANTS.join(', '));
-      else r.plant = matchedPlant;
+      const rawPlants = r.plant.split(';').map(p=>p.trim()).filter(Boolean);
+      const resolved = [], bad = [];
+      rawPlants.forEach(rp => {
+        const m = PLANTS.find(p => p.toLowerCase() === rp.toLowerCase());
+        if (m) resolved.push(m);
+        else bad.push(rp);
+      });
+      if (bad.length) r._errors.push('Plant(s) not found: "' + bad.join(', ') + '". Available: ' + PLANTS.join(', '));
+      else r.plant = resolved.join(';'); // normalised
     }
     if (!r._errors.length) r._valid = true;
     return r;
@@ -3588,12 +3649,16 @@ async function executeUserImport() {
   let imported = 0, skippedDup = 0;
   toImport.forEach(r => {
     if (_usersData[r.username]) skippedDup++;  // overwrite existing
+    const importedPlants = r.role === 'plant' && r.plant
+      ? r.plant.split(';').map(p=>p.trim()).filter(Boolean)
+      : [];
     _usersData[r.username] = {
       name: r.name,
       initials: r.initials,
       email: r.email,
       access: r.role,
-      plant: r.role === 'plant' ? r.plant : null,
+      plant: importedPlants[0] || null,          // backward compat
+      plants: importedPlants.length ? importedPlants : null,  // multi-plant
       role: r.role === 'admin' ? 'Administrator' : r.role === 'management' ? 'Top Management' : 'Plant User',
       password: r.password,
     };
