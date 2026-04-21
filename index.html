@@ -878,7 +878,7 @@ try {
 } catch(e) { console.warn('Firebase init failed — running in offline mode:', e); }
 const VISITS_COL = 'visits';
 const MAIL_DOC   = db.collection('config').doc('mailLogs');
-const USERS_DOC  = db.collection('config').doc('appUsers');
+const USERS_COL  = db.collection('appUsers');  // each user = own doc → no 1 MB single-doc limit
 const SETTINGS_DOC = db.collection('config').doc('appSettings');
 
 /* ══════════════════════════════════════════════════════════
@@ -1056,10 +1056,18 @@ function _persistUsers() {
   localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
   localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
 
-  // Push FULL user map to Firestore (including all custom users with passwords)
-  // This ensures users survive page reload/app restart — Firestore is the primary store
-  USERS_DOC.set({ users: _usersData, deletedDefaults: _deletedDefaultUsers })
-    .catch(e => console.error('saveUsers Firestore error:', e));
+  // Push each user as its own Firestore document — avoids the 1 MB single-doc limit
+  // that caused silent save failures when user count grew beyond ~17 entries.
+  const batch = db.batch();
+  Object.entries(_usersData).forEach(([id, u]) => {
+    batch.set(USERS_COL.doc(id), { ...u, _id: id });
+  });
+  // Store deleted-defaults list in a meta doc
+  batch.set(USERS_COL.doc('__meta__'), { deletedDefaults: _deletedDefaultUsers });
+  batch.commit().catch(e => {
+    console.error('saveUsers Firestore error:', e);
+    toast('⚠ Save Error', 'Users could not be saved to the server: ' + (e?.message || String(e)), true);
+  });
 }
 
 function saveUsers() { _persistUsers(); }
@@ -1107,44 +1115,50 @@ function initFirestoreListeners() {
     if (_appReady) updateBadges();
   }, e => console.error(e));
 
-  USERS_DOC.onSnapshot(doc => {
-    if (doc.exists && doc.data().users) {
-      const firestoreUsers = doc.data().users;
-      // Sync deletion list from Firestore
-      const fsDeleted = doc.data().deletedDefaults || [];
-      fsDeleted.forEach(id => { if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id); });
-      localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+  USERS_COL.onSnapshot(snapshot => {
+    // Each document is one user; __meta__ doc holds deletedDefaults
+    const firestoreUsers = {};
+    let fsDeleted = [];
+    snapshot.docs.forEach(doc => {
+      if (doc.id === '__meta__') {
+        fsDeleted = doc.data().deletedDefaults || [];
+      } else {
+        const data = { ...doc.data() };
+        delete data._id; // strip internal field
+        firestoreUsers[doc.id] = data;
+      }
+    });
 
-      // Build base: DEFAULT_USERS minus deleted ones
-      const base = {};
-      Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
-        if (!_deletedDefaultUsers.includes(id)) base[id] = u;
-      });
-      // Merge Firestore users on top — Firestore is the source of truth for custom users
-      const merged = { ...base, ...firestoreUsers };
-      // Remove any user that was explicitly deleted
-      _deletedDefaultUsers.forEach(id => { delete merged[id]; });
-      // FIX: For default accounts, restore access/hidden but KEEP Firestore password if it was changed
-      // Only restore password if the Firestore entry doesn't have one set (prevents lockout recovery issues)
-      Object.keys(DEFAULT_USERS).forEach(key => {
-        if (merged[key] && !_deletedDefaultUsers.includes(key)) {
-          // Keep whatever password is in Firestore (could be admin-changed); restore access + hidden from defaults
-          const fsPass = firestoreUsers[key]?.password;
-          merged[key] = {
-            ...merged[key],
-            access: DEFAULT_USERS[key].access,
-            hidden: DEFAULT_USERS[key].hidden,
-            // Use Firestore password if explicitly saved there, else fall back to default
-            password: fsPass || DEFAULT_USERS[key].password,
-          };
-        }
-      });
-      _usersData = merged;
-      // Keep localStorage in sync with Firestore truth
-      const customOnly = {};
-      Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
-      localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
-    }
+    // Sync deletion list from Firestore
+    fsDeleted.forEach(id => { if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id); });
+    localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+
+    // Build base: DEFAULT_USERS minus deleted ones
+    const base = {};
+    Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
+      if (!_deletedDefaultUsers.includes(id)) base[id] = u;
+    });
+    // Merge Firestore users on top — Firestore is the source of truth for custom users
+    const merged = { ...base, ...firestoreUsers };
+    // Remove any user that was explicitly deleted
+    _deletedDefaultUsers.forEach(id => { delete merged[id]; });
+    // For default accounts, restore access/hidden but KEEP Firestore password if changed
+    Object.keys(DEFAULT_USERS).forEach(key => {
+      if (merged[key] && !_deletedDefaultUsers.includes(key)) {
+        const fsPass = firestoreUsers[key]?.password;
+        merged[key] = {
+          ...merged[key],
+          access: DEFAULT_USERS[key].access,
+          hidden: DEFAULT_USERS[key].hidden,
+          password: fsPass || DEFAULT_USERS[key].password,
+        };
+      }
+    });
+    _usersData = merged;
+    // Keep localStorage in sync with Firestore truth
+    const customOnly = {};
+    Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
+    localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
   }, e => console.error(e));
 
   SETTINGS_DOC.onSnapshot(doc => {
