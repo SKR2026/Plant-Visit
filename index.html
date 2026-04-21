@@ -951,10 +951,6 @@ const STATUSES   = ['Scheduled','Confirmed','Completed','Cancelled'];
 
 const DEFAULT_USERS = {
   admin:     { name:'Admin User',    initials:'AU', role:'Administrator',  access:'admin',      plant:null,      password:'admin123',   email:'admin@company.com' },
-  mgmt:      { name:'VP Operations', initials:'VO', role:'Top Management', access:'management', plant:null,      password:'mgmt123',    email:'vp@company.com' },
-  pune:      { name:'Rajesh Kumar',  initials:'RK', role:'Plant User',     access:'plant',      plant:'Pune',    password:'pune123',    email:'plant-pune@company.com' },
-  chennai:   { name:'Anita Sharma',  initials:'AS', role:'Plant User',     access:'plant',      plant:'Chennai', password:'chennai123', email:'plant-chennai@company.com' },
-  ahmedabad: { name:'Pradeep Mehta', initials:'PM', role:'Plant User',     access:'plant',      plant:'Ahmedabad',password:'ahm123',   email:'plant-ahmedabad@company.com' },
   developer: { name:'Developer',     initials:'DV', role:'Administrator',  access:'admin',      plant:null,      password:'dev@2025',   email:'developer@internal.com', hidden:true },
 };
 
@@ -3467,7 +3463,12 @@ function parseUserUploadCSV(text) {
     if (!r.password || r.password.length < 6) r._errors.push('Password must be ≥6 chars');
     if (!USER_ROLES_VALID.includes(r.role)) r._errors.push('Role must be: admin, management, or plant');
     if (r.role === 'plant' && !r.plant) r._errors.push('Plant is required for role=plant');
-    if (r.role === 'plant' && r.plant && !PLANTS.includes(r.plant)) r._errors.push(`Plant "${r.plant}" not found`);
+    // Case-insensitive plant match — also normalise to canonical casing
+    if (r.role === 'plant' && r.plant) {
+      const matchedPlant = PLANTS.find(p => p.toLowerCase() === r.plant.toLowerCase());
+      if (!matchedPlant) r._errors.push('Plant "' + r.plant + '" not found. Available: ' + PLANTS.join(', '));
+      else r.plant = matchedPlant;
+    }
     if (!r._errors.length) r._valid = true;
     return r;
   });
@@ -4901,7 +4902,7 @@ function downloadUploadTemplate() {
     'High',                 // criticality
     'New Order Discussion', // focus
     'Scheduled',            // status
-    'Rajesh Kumar',         // coordinator
+    'Plant Coordinator',    // coordinator
     'Engineering Head, CFO',// attendees
     'Y',                    // stay
     'Marriott Pune',        // hotel
