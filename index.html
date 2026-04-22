@@ -53,7 +53,7 @@
   --font:'DM Sans', 'Segoe UI', sans-serif;
 }
 body.light {
-  --navy:#f4f3f0;--navy2:#ebe9e4;--navy3:#e0ddd6;--navy4:#d4d0c8;--navy5:#c8c3b8;
+  --navy:#eef4fb;--navy2:#deeaf6;--navy3:#cde0f0;--navy4:#b8d3e8;--navy5:#a0c3dc;
   --gold:#b8860b;--gold2:#d4a017;--gold-dim:#8a6408;
   --gold-bg:rgba(184,134,11,0.08);--gold-bdr:rgba(184,134,11,0.20);
   --slate:#6b6a60;--slate2:#4a4940;--white:#1a1918;--white2:#3a3930;
@@ -1058,6 +1058,8 @@ function _persistUsers() {
   Object.entries(_usersData).forEach(([id, u]) => {
     if (!DEFAULT_USERS[id]) customOnly[id] = u;
   });
+  // ★ FIX: Save to localStorage FIRST so new users survive a reload even if
+  //   Firestore hasn't confirmed the write yet (prevents onSnapshot race condition).
   localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
   localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
 
@@ -1156,9 +1158,18 @@ function initFirestoreListeners() {
       });
       _usersData = merged;
 
+      // ★ FIX: Merge Firestore users with any locally-pending custom users so that
+      //   a new user saved moments ago (not yet confirmed by Firestore) isn't wiped.
+      let pendingCustom = {};
+      try { pendingCustom = JSON.parse(localStorage.getItem('pv_users_custom') || '{}'); } catch(e) {}
       const customOnly = {};
       Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
-      localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
+      const mergedCustom = { ...pendingCustom, ...customOnly };
+      localStorage.setItem('pv_users_custom', JSON.stringify(mergedCustom));
+      // Also merge pending custom users that Firestore hasn't confirmed yet into live state
+      Object.entries(pendingCustom).forEach(([id, u]) => {
+        if (!_usersData[id]) _usersData[id] = u;
+      });
 
     } else {
       // No docs yet — attempt one-time migration from old single-doc format
