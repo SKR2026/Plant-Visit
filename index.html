@@ -4396,45 +4396,65 @@ const UPLOAD_COLS = [
 
 const UPLOAD_REQUIRED = ['confirm_date','visit_date','plant','company','rep','focus','coordinator','agenda'];
 
-/* ── Render entry point ──────────────────────────────── */
+/* ══════════════════════════════════════════════════════════
+   BULK UPLOAD — rewritten from scratch
+   Phase 1 → Phase 2 → Phase 3
+══════════════════════════════════════════════════════════ */
+
+/* ── Entry point ──────────────────────────────────────── */
 function renderBulkUpload(el) {
   if (currentUser.access !== 'admin') {
     el.innerHTML = '<div class="alert alert-warn">⚠ Bulk Upload is only accessible to Super Admins.</div>';
     return;
   }
-  _uploadPhase = 1;
   _uploadRows  = [];
   _uploadSkip  = new Set();
-
+  _uploadPhase = 1;
   el.innerHTML = `
-  <div class="section-header">
-    <div class="section-title">📤 Bulk Upload Visits</div>
-    <div class="section-sub">Import multiple visit records from a CSV file — Super Admin only</div>
-  </div>
-  <div id="uploadBody"></div>`;
-
-  renderUploadPhase1();
+    <div class="section-header">
+      <div class="section-title">📤 Bulk Upload Visits</div>
+      <div class="section-sub">Import multiple visit records from a CSV file — Super Admin only</div>
+    </div>
+    <div id="uploadBody"></div>`;
+  _renderUploadPhase1();
 }
 
-/* ─────────────────────────────────────────────────────────
-   PHASE 1 — File drop zone + template download
-───────────────────────────────────────────────────────── */
-function renderUploadPhase1() {
+/* ── Step indicator HTML ─────────────────────────────── */
+function _uploadSteps(active) {
+  const steps = ['Upload CSV','Preview & Validate','Import'];
+  return `<div class="card" style="padding:16px 20px 8px">
+    <div class="upload-steps">
+      ${steps.map((label,i) => {
+        const n = i + 1;
+        const cls = n < active ? 'done' : n === active ? 'active' : '';
+        const num = n < active ? '✓' : n;
+        return `<div class="upload-step ${cls}">
+          <div class="upload-step-num">${num}</div>
+          <div class="upload-step-label">${label}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PHASE 1 — Drop zone
+══════════════════════════════════════════════════════════ */
+function _renderUploadPhase1() {
   _uploadPhase = 1;
   const el = document.getElementById('uploadBody');
   if (!el) return;
 
-  el.innerHTML = `
-  <!-- Step indicator -->
-  <div class="card" style="padding:16px 20px 8px">
-    <div class="upload-steps">
-      <div class="upload-step active"><div class="upload-step-num">1</div><div class="upload-step-label">Upload CSV</div></div>
-      <div class="upload-step"><div class="upload-step-num">2</div><div class="upload-step-label">Preview &amp; Validate</div></div>
-      <div class="upload-step"><div class="upload-step-num">3</div><div class="upload-step-label">Import</div></div>
-    </div>
-  </div>
+  const validRef = [
+    { label:'plant',       vals: PLANTS },
+    { label:'criticality', vals: CRITS },
+    { label:'status',      vals: STATUSES },
+    { label:'category',    vals: CATEGORIES },
+    { label:'stay',        vals: ['Y','N'] },
+  ];
 
-  <!-- Drop zone -->
+  el.innerHTML = `
+  ${_uploadSteps(1)}
   <div class="card">
     <div class="card-header">
       <div class="card-title">📂 Select or Drop a CSV File</div>
@@ -4445,20 +4465,19 @@ function renderUploadPhase1() {
          onclick="document.getElementById('csvFileInput').click()"
          ondragover="event.preventDefault();this.classList.add('drag-over')"
          ondragleave="this.classList.remove('drag-over')"
-         ondrop="handleUploadDrop(event)">
-      <input type="file" id="csvFileInput" accept=".csv,text/csv" onchange="handleUploadFile(this.files[0])">
+         ondrop="_handleUploadDrop(event)">
+      <input type="file" id="csvFileInput" accept=".csv,text/csv" onchange="_handleUploadFile(this.files[0])">
       <div class="upload-hero-icon">📄</div>
       <div class="upload-hero-title">Drag &amp; drop your CSV here, or click to browse</div>
       <div class="upload-hero-sub">
         Accepts <strong>.csv</strong> files only &nbsp;·&nbsp; Max 2 000 rows<br>
-        First row must be the header row (column names)
+        First row must be the header row
       </div>
     </div>
 
-    <!-- Column reference -->
     <div style="margin-top:20px">
       <div style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">
-        Required columns <span style="color:var(--gold)">★</span> &nbsp;·&nbsp; Optional columns
+        Required <span style="color:var(--gold)">★</span> &nbsp;·&nbsp; Optional columns
       </div>
       <div class="field-chips">
         ${UPLOAD_COLS.map(c => `<span class="field-chip${UPLOAD_REQUIRED.includes(c)?' required':''}">
@@ -4467,84 +4486,300 @@ function renderUploadPhase1() {
       </div>
     </div>
 
-    <!-- Accepted values reference -->
-    <div class="alert alert-info" style="margin-top:16px;flex-direction:column;align-items:flex-start;gap:6px">
-      <strong>Accepted values for key columns:</strong>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;margin-top:2px">
-        <span><strong>plant:</strong> ${PLANTS.map(p=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${p}</code>`).join(' ')}</span>
-        <span><strong>criticality:</strong> ${CRITS.map(c=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${c}</code>`).join(' ')}</span>
-        <span><strong>status:</strong> ${STATUSES.map(s=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${s}</code>`).join(' ')}</span>
-        <span><strong>stay:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">Y</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">N</code></span>
-        <span><strong>category:</strong> ${CATEGORIES.slice(0,4).map(c=>`<code style="background:var(--navy4);padding:1px 5px;border-radius:3px">${c}</code>`).join(' ')} …</span>
-        <span><strong>dates:</strong> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">YYYY-MM-DD</code> — visit_date_end optional, blank = single-day</span>
+    <div class="alert alert-info" style="margin-top:16px;flex-direction:column;align-items:flex-start;gap:8px">
+      <strong style="font-size:12px">Accepted values for key columns:</strong>
+      <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;width:100%">
+        ${validRef.map(r => `<div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
+          <span style="color:var(--slate2);font-weight:600;min-width:76px">${r.label}:</span>
+          <span style="display:flex;flex-wrap:wrap;gap:4px">
+            ${r.vals.map(v=>`<code style="background:var(--navy4);padding:1px 6px;border-radius:3px">${v}</code>`).join('')}
+          </span>
+        </div>`).join('')}
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--slate2);font-weight:600;min-width:76px">dates:</span>
+          <code style="background:var(--navy4);padding:1px 6px;border-radius:3px">YYYY-MM-DD</code>
+          <span style="color:var(--slate)">— visit_date_end optional (blank = single-day)</span>
+        </div>
       </div>
     </div>
   </div>`;
 }
 
-/* ─────────────────────────────────────────────────────────
-   PHASE 2 — Preview table with per-row validation
-───────────────────────────────────────────────────────── */
-function renderUploadPhase2() {
+/* ══════════════════════════════════════════════════════════
+   FILE HANDLING
+══════════════════════════════════════════════════════════ */
+function _handleUploadDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadDropZone')?.classList.remove('drag-over');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) _handleUploadFile(file);
+}
+
+function _handleUploadFile(file) {
+  if (!file) return;
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && file.type !== 'text/csv') {
+    toast('Invalid File', 'Please upload a .csv file.', true); return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    toast('File Too Large', 'CSV must be under 5 MB.', true); return;
+  }
+  const reader = new FileReader();
+  reader.onload  = ev => _parseAndValidateCSV(ev.target.result);
+  reader.onerror = ()  => toast('Read Error', 'Could not read the file.', true);
+  reader.readAsText(file, 'UTF-8');
+}
+
+/* ══════════════════════════════════════════════════════════
+   CSV PARSER — handles quoted fields, commas inside quotes
+══════════════════════════════════════════════════════════ */
+function _parseCSVLine(line) {
+  const out = [];
+  let field = '', inQ = false, i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"' && line[i+1] === '"') { field += '"'; i += 2; }
+      else if (ch === '"')                 { inQ = false; i++; }
+      else                                 { field += ch; i++; }
+    } else {
+      if      (ch === '"') { inQ = true; i++; }
+      else if (ch === ',') { out.push(field.trim()); field = ''; i++; }
+      else                 { field += ch; i++; }
+    }
+  }
+  out.push(field.trim());
+  return out;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PARSE & VALIDATE
+══════════════════════════════════════════════════════════ */
+function _parseAndValidateCSV(raw) {
+  const lines = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n')
+                   .split('\n')
+                   .filter(l => l.trim() && !l.trim().startsWith('#'));
+
+  if (lines.length < 2) {
+    toast('Empty File', 'CSV needs at least a header row + 1 data row.', true); return;
+  }
+  if (lines.length > 2001) {
+    toast('Too Many Rows', 'Maximum 2 000 data rows per upload.', true); return;
+  }
+
+  // Parse & normalise header
+  const header = _parseCSVLine(lines[0])
+    .map(h => h.toLowerCase().replace(/[\s\-]+/g,'_').replace(/[^a-z0-9_]/g,''));
+
+  // Map column positions
+  const colPos = {};
+  UPLOAD_COLS.forEach(col => { colPos[col] = header.indexOf(col); });
+
+  // Check required columns are present
+  const missingCols = UPLOAD_REQUIRED.filter(c => colPos[c] === -1);
+  if (missingCols.length) {
+    toast('Missing Columns', 'Required columns not found: ' + missingCols.join(', '), true);
+    return;
+  }
+
+  const getCol = (cells, col) =>
+    (colPos[col] !== undefined && colPos[col] >= 0)
+      ? (cells[colPos[col]] || '').trim()
+      : '';
+
+  // Build existing-record keys for duplicate detection
+  // Key format: "company_lower|plant_lower|visit_date"
+  const existingKeys = new Set(
+    (_visitsData || []).map(v =>
+      [(v.company||'').trim().toLowerCase(),
+       (v.plant||'').trim().toLowerCase(),
+       (v.visitDate||'').trim()].join('|')
+    )
+  );
+
+  const dateRe    = /^\d{4}-\d{2}-\d{2}$/;
+  const matchList = (list, val) =>
+    list.find(item => item.toLowerCase() === (val||'').trim().toLowerCase()) || null;
+
+  _uploadRows  = [];
+  _uploadSkip  = new Set();
+  const seenInFile = new Map();
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+
+    const cells = _parseCSVLine(lines[i]);
+    const g     = col => getCol(cells, col);
+
+    const confirmDate  = g('confirm_date');
+    const visitDate    = g('visit_date');
+    const visitDateEnd = g('visit_date_end');
+    const plantRaw     = g('plant');
+    const company      = g('company');
+    const rep          = g('rep');
+    const focusVal     = g('focus');
+    const coordinator  = g('coordinator');
+    const agenda       = g('agenda');
+
+    // Auto-resolve dropdowns with case-insensitive matching
+    const plantMatch   = matchList(PLANTS, plantRaw);
+    const plantVal     = plantMatch || plantRaw;
+
+    const catRaw       = g('category') || CATEGORIES[0];
+    const catMatch     = matchList(CATEGORIES, catRaw);
+    const catVal       = catMatch || CATEGORIES[0];
+
+    const critRaw      = g('criticality');
+    const critResolved = critRaw || 'Medium';
+    const critMatch    = matchList(CRITS, critResolved);
+    const critVal      = critMatch || 'Medium';
+
+    const statusRaw    = g('status');
+    const statusResolved = statusRaw || 'Scheduled';
+    const statusMatch  = matchList(STATUSES, statusResolved);
+    const statusVal    = statusMatch || 'Scheduled';
+
+    const stayVal      = (g('stay').toUpperCase() === 'Y') ? 'Y' : 'N';
+
+    const row = {
+      _idx:          _uploadRows.length,
+      _valid:        true,
+      _errors:       [],
+      _warnings:     [],
+      confirm_date:   confirmDate,
+      visit_date:     visitDate,
+      visit_date_end: visitDateEnd,
+      plant:          plantVal,
+      company:        company,
+      rep:            rep,
+      category:       catVal,
+      criticality:    critVal,
+      focus:          focusVal,
+      status:         statusVal,
+      coordinator:    coordinator,
+      attendees:      g('attendees'),
+      stay:           stayVal,
+      hotel:          g('hotel'),
+      remarks:        g('remarks'),
+      agenda:         agenda,
+    };
+
+    const errs = row._errors;
+    const warn = row._warnings;
+
+    // V1 — Required fields
+    UPLOAD_REQUIRED.forEach(col => {
+      if (!row[col]) errs.push('"' + col + '" is required');
+    });
+
+    // V2 — Date format
+    if (confirmDate  && !dateRe.test(confirmDate))
+      errs.push('confirm_date must be YYYY-MM-DD (got: "' + confirmDate + '")');
+    if (visitDate    && !dateRe.test(visitDate))
+      errs.push('visit_date must be YYYY-MM-DD (got: "' + visitDate + '")');
+    if (visitDateEnd && !dateRe.test(visitDateEnd))
+      errs.push('visit_date_end must be YYYY-MM-DD (got: "' + visitDateEnd + '")');
+
+    // V3 — Date range
+    if (visitDate && visitDateEnd && dateRe.test(visitDate) && dateRe.test(visitDateEnd)
+        && visitDateEnd < visitDate)
+      errs.push('visit_date_end cannot be before visit_date');
+
+    // V4 — Plant must match live list
+    if (plantRaw && !plantMatch)
+      errs.push('plant "' + plantRaw + '" not found. Valid: ' + PLANTS.join(', '));
+
+    // V5 — Criticality (only flag if user typed an explicit bad value)
+    if (critRaw && !critMatch)
+      errs.push('criticality "' + critRaw + '" invalid. Valid: ' + CRITS.join(', '));
+
+    // V6 — Status (only flag if user typed an explicit bad value)
+    if (statusRaw && !statusMatch)
+      errs.push('status "' + statusRaw + '" invalid. Valid: ' + STATUSES.join(', '));
+
+    // V7 — Category auto-corrected warning
+    if (catRaw !== CATEGORIES[0] && !catMatch)
+      warn.push('category "' + catRaw + '" unknown — auto-set to "' + CATEGORIES[0] + '"');
+
+    // V8 — Duplicate check vs existing DB records
+    if (errs.length === 0) {
+      const dupKey = [company.trim().toLowerCase(), plantVal.trim().toLowerCase(), visitDate].join('|');
+      if (existingKeys.has(dupKey)) {
+        errs.push('Duplicate: "' + company + '" at ' + plantVal + ' on ' + visitDate + ' already exists in the database');
+      } else if (seenInFile.has(dupKey)) {
+        errs.push('Duplicate of row #' + (seenInFile.get(dupKey)+1) + ' in this file (same company, plant & date)');
+      } else {
+        seenInFile.set(dupKey, row._idx);
+      }
+    }
+
+    row._valid = errs.length === 0;
+    _uploadRows.push(row);
+  }
+
+  if (_uploadRows.length === 0) {
+    toast('No Data', 'No data rows found in the file.', true); return;
+  }
+  _renderUploadPhase2();
+}
+
+/* ══════════════════════════════════════════════════════════
+   PHASE 2 — Preview table with inline errors
+══════════════════════════════════════════════════════════ */
+function _renderUploadPhase2() {
   _uploadPhase = 2;
   const el = document.getElementById('uploadBody');
   if (!el) return;
 
-  const total   = _uploadRows.length;
-  const okRows  = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
-  const errRows = _uploadRows.filter(r => !r._valid);
-  const skipCnt = _uploadSkip.size;
+  const total     = _uploadRows.length;
+  const errCount  = _uploadRows.filter(r => !r._valid).length;
+  const okCount   = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx)).length;
+  const skipCount = _uploadSkip.size;
 
-  const rows = _uploadRows.map(r => {
-    const isSkipped = _uploadSkip.has(r._idx);
-    const rowClass  = isSkipped ? 'row-skip' : r._valid ? 'row-ok' : 'row-err';
-    const statusCell = isSkipped
-      ? `<span class="row-status-skip">— Skipped</span>`
+  const rowsHtml = _uploadRows.map(r => {
+    const skipped  = _uploadSkip.has(r._idx);
+    const rowClass = skipped ? 'row-skip' : r._valid ? 'row-ok' : 'row-err';
+
+    const statusCell = skipped
+      ? '<span class="row-status-skip">— Skipped</span>'
       : r._valid
-        ? `<span class="row-status-ok">✓ Ready</span>`
-        : `<span class="row-status-err">✗ Error</span>`;
-    const errCell = r._errors.length
-      ? `<div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div>`
-      : '';
-    const warnCell = (r._warnings && r._warnings.length)
-      ? `<div style="font-size:10px;color:var(--orange)" title="${xe(r._warnings.join('; '))}">⚠ ${r._warnings[0]}</div>`
-      : '';
-    const toggleBtn = `<button onclick="toggleUploadRow(${r._idx})" title="${isSkipped?'Include this row':'Exclude this row'}"
-      style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">
-      ${isSkipped?'Include':'Skip'}
-    </button>`;
+        ? '<span class="row-status-ok">✓ Ready</span>'
+        : '<span class="row-status-err">✗ Error</span>';
 
-    return `<tr class="${rowClass}">
-      <td style="color:var(--slate);font-size:10px">${r._idx+1}</td>
-      <td>${statusCell}${errCell?`<div style="margin-top:3px">${errCell}</div>`:''}${warnCell?`<div style="margin-top:2px">${warnCell}</div>`:''}</td>
-      <td style="white-space:nowrap">${xe(r.confirm_date||'')}</td>
-      <td style="white-space:nowrap">${xe(r.visit_date||'')}${r.visit_date_end?`<span style="color:var(--slate);font-size:10px;display:block">→ ${xe(r.visit_date_end)}</span>`:''}</td>
-      <td>${xe(r.plant||'')}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${xe(r.company||'')}">${xe(r.company||'')}</td>
-      <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${xe(r.rep||'')}</td>
-      <td>${xe(r.category||'')}</td>
-      <td>${r.criticality?critBadge(r.criticality):''}</td>
-      <td>${r.status?statusBadge(r.status):''}</td>
-      <td style="white-space:nowrap">${r.stay==='Y'?'<span class="badge badge-medium">Yes</span>':'No'}</td>
-      <td>${toggleBtn}</td>
-    </tr>`;
+    const errHtml = r._errors.length
+      ? '<ul style="margin:4px 0 0 0;padding:0 0 0 14px;list-style:disc">'
+        + r._errors.map(e => '<li style="font-size:10px;color:var(--red);line-height:1.5">' + xe(e) + '</li>').join('')
+        + '</ul>'
+      : '';
+    const warnHtml = r._warnings.length
+      ? '<div style="font-size:10px;color:var(--orange);margin-top:3px">⚠ ' + xe(r._warnings[0]) + '</div>'
+      : '';
+
+    const toggleBtn = '<button onclick="_toggleUploadRow(' + r._idx + ')"'
+      + ' style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;color:var(--slate2)">'
+      + (skipped ? 'Include' : 'Skip') + '</button>';
+
+    return '<tr class="' + rowClass + '">'
+      + '<td style="color:var(--slate);font-size:10px;padding:8px 6px">' + (r._idx+1) + '</td>'
+      + '<td style="min-width:130px">' + statusCell + errHtml + warnHtml + '</td>'
+      + '<td style="white-space:nowrap">' + xe(r.confirm_date||'—') + '</td>'
+      + '<td style="white-space:nowrap">' + xe(r.visit_date||'—')
+        + (r.visit_date_end ? '<span style="color:var(--slate);font-size:10px;display:block">→ ' + xe(r.visit_date_end) + '</span>' : '')
+        + '</td>'
+      + '<td>' + xe(r.plant||'') + '</td>'
+      + '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + xe(r.company||'') + '">' + xe(r.company||'') + '</td>'
+      + '<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + xe(r.rep||'') + '</td>'
+      + '<td>' + (r.criticality ? critBadge(r.criticality) : '') + '</td>'
+      + '<td>' + (r.status ? statusBadge(r.status) : '') + '</td>'
+      + '<td>' + toggleBtn + '</td>'
+      + '</tr>';
   }).join('');
 
-  el.innerHTML = `
-  <!-- Step indicator -->
-  <div class="card" style="padding:16px 20px 8px">
-    <div class="upload-steps">
-      <div class="upload-step done"><div class="upload-step-num">✓</div><div class="upload-step-label">Upload CSV</div></div>
-      <div class="upload-step active"><div class="upload-step-num">2</div><div class="upload-step-label">Preview &amp; Validate</div></div>
-      <div class="upload-step"><div class="upload-step-num">3</div><div class="upload-step-label">Import</div></div>
-    </div>
-  </div>
-
-  <!-- Summary stats -->
+  el.innerHTML = _uploadSteps(2) + `
   <div class="card">
     <div class="card-header">
-      <div class="card-title">Preview — ${total} Row${total!==1?'s':''} Parsed</div>
-      <button class="btn btn-ghost btn-sm" onclick="renderUploadPhase1()">← Change File</button>
+      <div class="card-title">Preview — ${total} row${total!==1?'s':''} parsed</div>
+      <button class="btn btn-ghost btn-sm" onclick="_renderUploadPhase1()">← Change File</button>
     </div>
     <div class="import-summary">
       <div class="import-stat">
@@ -4552,74 +4787,187 @@ function renderUploadPhase2() {
         <div class="import-stat-label">Total Rows</div>
       </div>
       <div class="import-stat">
-        <div class="import-stat-num" style="color:var(--green)" id="upOkCount">${okRows.length}</div>
-        <div class="import-stat-label">Ready to Import</div>
+        <div class="import-stat-num" style="color:var(--green)" id="upOkCount">${okCount}</div>
+        <div class="import-stat-label">Ready</div>
       </div>
       <div class="import-stat">
-        <div class="import-stat-num" style="color:var(--red)">${errRows.length}</div>
-        <div class="import-stat-label">Validation Errors</div>
+        <div class="import-stat-num" style="color:var(--red)">${errCount}</div>
+        <div class="import-stat-label">Errors</div>
       </div>
       <div class="import-stat">
-        <div class="import-stat-num" style="color:var(--slate)" id="upSkipCount">${skipCnt}</div>
+        <div class="import-stat-num" style="color:var(--slate)" id="upSkipCount">${skipCount}</div>
         <div class="import-stat-label">Skipped</div>
       </div>
     </div>
-
-    ${errRows.length ? `<div class="alert alert-warn" style="margin-bottom:14px">
-      ⚠ <strong>${errRows.length} row${errRows.length>1?'s have':' has'} validation errors</strong> and will be excluded from import.
-      Fix the errors in your CSV and re-upload, or skip those rows.
-    </div>` : ''}
-
-    <!-- Preview table -->
-    <div class="preview-wrap" id="uploadPreviewTable">
+    ${errCount
+      ? `<div class="alert alert-warn" style="margin-bottom:14px">
+          ⚠ <strong>${errCount} row${errCount>1?'s have':' has'} errors</strong> — shown inline below.
+          Fix them in your CSV and re-upload, or click <strong>Skip Errors</strong> to exclude them and import the rest.
+         </div>`
+      : `<div class="alert alert-success" style="margin-bottom:14px">✅ All rows passed validation — ready to import.</div>`
+    }
+    <div class="preview-wrap">
       <table class="preview-table">
         <thead>
           <tr>
             <th>#</th><th>Validation</th>
             <th>Confirm Date</th><th>Visit Date</th><th>Plant</th>
-            <th>Company</th><th>Rep</th><th>Category</th>
-            <th>Criticality</th><th>Visit Status</th><th>Stay</th><th></th>
+            <th>Company</th><th>Rep</th>
+            <th>Criticality</th><th>Status</th><th></th>
           </tr>
         </thead>
-        <tbody id="uploadTbody">${rows}</tbody>
+        <tbody id="uploadTbody">${rowsHtml}</tbody>
       </table>
     </div>
-
-    <!-- Actions -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="selectAllUploadRows()">Include All</button>
-        <button class="btn btn-ghost btn-sm" onclick="skipAllErrRows()">Skip Errors Only</button>
+        <button class="btn btn-ghost btn-sm" onclick="_selectAllUploadRows()">Include All</button>
+        <button class="btn btn-ghost btn-sm" onclick="_skipErrRows()">Skip Errors</button>
       </div>
-      <button class="btn btn-gold" id="btnDoImport" onclick="executeUploadImport()"
-        ${okRows.length===0?'disabled':''}>
-        ✦ Import <span id="btnImportCount">${okRows.length}</span> Record${okRows.length!==1?'s':''}
+      <button class="btn btn-gold" id="btnDoImport"
+        onclick="_executeUploadImport()"
+        ${okCount===0?'disabled':''}>
+        ✦ Import <span id="btnImportCount">${okCount}</span> Record${okCount!==1?'s':''}
       </button>
     </div>
   </div>`;
 }
 
-/* ─────────────────────────────────────────────────────────
-   PHASE 3 — Import result summary
-───────────────────────────────────────────────────────── */
-function renderUploadPhase3(imported, skipped, errors) {
+/* ── Row toggle helpers ──────────────────────────────── */
+function _toggleUploadRow(idx) {
+  if (_uploadSkip.has(idx)) _uploadSkip.delete(idx);
+  else _uploadSkip.add(idx);
+  _refreshUploadCounts();
+}
+function _selectAllUploadRows() {
+  _uploadSkip = new Set();
+  _renderUploadPhase2();
+}
+function _skipErrRows() {
+  _uploadSkip = new Set();
+  _uploadRows.forEach(r => { if (!r._valid) _uploadSkip.add(r._idx); });
+  _renderUploadPhase2();
+}
+function _refreshUploadCounts() {
+  const okCount   = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx)).length;
+  const skipCount = _uploadSkip.size;
+  const okEl    = document.getElementById('upOkCount');
+  const skipEl  = document.getElementById('upSkipCount');
+  const btnEl   = document.getElementById('btnDoImport');
+  const cntEl   = document.getElementById('btnImportCount');
+  if (okEl)   okEl.textContent   = okCount;
+  if (skipEl) skipEl.textContent = skipCount;
+  if (btnEl)  btnEl.disabled     = okCount === 0;
+  if (cntEl)  cntEl.textContent  = okCount;
+  // Refresh row class & button text
+  const tbody = document.getElementById('uploadTbody');
+  if (!tbody) return;
+  _uploadRows.forEach(r => {
+    const tr = tbody.rows[r._idx];
+    if (!tr) return;
+    const skipped = _uploadSkip.has(r._idx);
+    tr.className  = skipped ? 'row-skip' : r._valid ? 'row-ok' : 'row-err';
+    const span    = tr.cells[1].querySelector('span');
+    if (span) {
+      span.className   = skipped ? 'row-status-skip' : r._valid ? 'row-status-ok' : 'row-status-err';
+      span.textContent = skipped ? '— Skipped' : r._valid ? '✓ Ready' : '✗ Error';
+    }
+    const btn = tr.cells[tr.cells.length-1].querySelector('button');
+    if (btn) btn.textContent = skipped ? 'Include' : 'Skip';
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   EXECUTE IMPORT
+══════════════════════════════════════════════════════════ */
+async function _executeUploadImport() {
+  const toImport = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
+  if (!toImport.length) {
+    toast('Nothing to Import', 'No valid rows selected.', true); return;
+  }
+
+  const btn = document.getElementById('btnDoImport');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+
+  const now = new Date().toISOString();
+
+  // Final real-time duplicate guard
+  const liveKeys = new Set(
+    (_visitsData || []).map(v =>
+      [(v.company||'').trim().toLowerCase(),(v.plant||'').trim().toLowerCase(),(v.visitDate||'')].join('|')
+    )
+  );
+
+  const newVisits = [], lateDupes = [], batchKeys = new Set();
+  toImport.forEach(r => {
+    const key = [r.company.trim().toLowerCase(), r.plant.trim().toLowerCase(), r.visit_date].join('|');
+    if (liveKeys.has(key) || batchKeys.has(key)) {
+      lateDupes.push(r.company);
+    } else {
+      batchKeys.add(key);
+      newVisits.push({
+        id:           'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+        confirmDate:   r.confirm_date,
+        visitDate:     r.visit_date,
+        visitDateEnd:  r.visit_date_end || '',
+        plant:         r.plant,
+        company:       r.company.trim(),
+        rep:           r.rep.trim(),
+        category:      r.category,
+        criticality:   r.criticality,
+        focus:         r.focus.trim(),
+        status:        r.status,
+        coordinator:   r.coordinator.trim(),
+        attendees:     r.attendees.trim(),
+        stay:          r.stay,
+        hotel:         r.hotel.trim(),
+        remarks:       r.remarks.trim(),
+        agenda:        r.agenda.trim(),
+        createdAt:     now,
+        createdBy:     currentUser.id,
+        importedAt:    now,
+      });
+    }
+  });
+
+  if (!newVisits.length) {
+    toast('All Duplicates', 'Every selected row already exists in the database.', true);
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
+    return;
+  }
+
+  const BATCH_SIZE = 400;
+  try {
+    for (let i = 0; i < newVisits.length; i += BATCH_SIZE) {
+      const chunk = newVisits.slice(i, i + BATCH_SIZE);
+      const batch = db.batch();
+      chunk.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
+      await batch.commit();
+      const pct = Math.min(Math.round(((i + chunk.length) / newVisits.length) * 100), 100);
+      if (btn) btn.textContent = 'Importing… ' + pct + '%';
+    }
+    _visitsData = [...(_visitsData || []), ...newVisits];
+    updateBadges();
+    const skippedCount = _uploadSkip.size;
+    const errCount     = _uploadRows.filter(r => !r._valid).length + lateDupes.length;
+    _renderUploadPhase3(newVisits.length, skippedCount, errCount);
+    const dupNote = lateDupes.length ? ' (' + lateDupes.length + ' late duplicate' + (lateDupes.length>1?'s':'') + ' blocked)' : '';
+    toast('✦ ' + newVisits.length + ' Records Imported', 'Bulk upload complete' + dupNote + '.');
+  } catch(e) {
+    console.error('Bulk import error:', e);
+    toast('Import Failed', e?.message || String(e), true);
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
+  }
+}
+
+/* ── Phase 3 — Success screen ───────────────────────── */
+function _renderUploadPhase3(imported, skipped, errors) {
   _uploadPhase = 3;
   const el = document.getElementById('uploadBody');
   if (!el) return;
-  el.innerHTML = `
-  <!-- Step indicator -->
-  <div class="card" style="padding:16px 20px 8px">
-    <div class="upload-steps">
-      <div class="upload-step done"><div class="upload-step-num">✓</div><div class="upload-step-label">Upload CSV</div></div>
-      <div class="upload-step done"><div class="upload-step-num">✓</div><div class="upload-step-label">Preview &amp; Validate</div></div>
-      <div class="upload-step active"><div class="upload-step-num">3</div><div class="upload-step-label">Import</div></div>
-    </div>
-  </div>
-
+  el.innerHTML = _uploadSteps(3) + `
   <div class="card">
-    <div class="card-header">
-      <div class="card-title">🎉 Import Complete</div>
-    </div>
+    <div class="card-header"><div class="card-title">🎉 Import Complete</div></div>
     <div class="import-summary">
       <div class="import-stat">
         <div class="import-stat-num" style="color:var(--green)">${imported}</div>
@@ -4631,11 +4979,11 @@ function renderUploadPhase3(imported, skipped, errors) {
       </div>
       <div class="import-stat">
         <div class="import-stat-num" style="color:var(--red)">${errors}</div>
-        <div class="import-stat-label">Errors</div>
+        <div class="import-stat-label">Blocked / Errors</div>
       </div>
     </div>
-    <div class="alert alert-success" style="color:var(--green);background:var(--green-bg);border:1px solid rgba(90,191,122,.2);margin-bottom:16px">
-      ✅ <strong>${imported} visit record${imported!==1?'s':''}</strong> successfully imported and synced to Firebase Firestore.
+    <div class="alert alert-success" style="margin-bottom:16px">
+      ✅ <strong>${imported} visit record${imported!==1?'s':''}</strong> successfully imported and synced to Firestore.
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-gold" onclick="showTab('records')">View Records →</button>
@@ -4644,578 +4992,57 @@ function renderUploadPhase3(imported, skipped, errors) {
   </div>`;
 }
 
-/* ─────────────────────────────────────────────────────────
-   FILE HANDLING
-───────────────────────────────────────────────────────── */
-function handleUploadDrop(e) {
-  e.preventDefault();
-  document.getElementById('uploadDropZone')?.classList.remove('drag-over');
-  const file = e.dataTransfer?.files?.[0];
-  if (file) handleUploadFile(file);
-}
-
-function handleUploadFile(file) {
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv') {
-    toast('Invalid File', 'Please upload a .csv file.', true); return;
-  }
-  if (file.size > 4 * 1024 * 1024) {
-    toast('File Too Large', 'CSV file must be under 4 MB.', true); return;
-  }
-  const reader = new FileReader();
-  reader.onload = e => {
-    const text = e.target.result;
-    parseUploadCSV(text);
-  };
-  reader.onerror = () => toast('Read Error', 'Could not read the file.', true);
-  reader.readAsText(file, 'UTF-8');
-}
-
-/* ─────────────────────────────────────────────────────────
-   CSV PARSER + VALIDATOR
-───────────────────────────────────────────────────────── */
-function parseUploadCSV(text) {
-  // Normalize line endings
-  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(l => l.trim());
-  if (lines.length < 2) {
-    toast('Empty File', 'CSV has no data rows (need at least header + 1 data row).', true); return;
-  }
-  if (lines.length > 2001) {
-    toast('Too Many Rows', 'Max 2 000 data rows per upload.', true); return;
-  }
-
-  // Parse header — normalise to lowercase_underscore
-  const header = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/\s+/g,'_'));
-
-  // Map header positions
-  const colIdx = {};
-  UPLOAD_COLS.forEach(col => { colIdx[col] = header.indexOf(col); });
-
-  // Check required columns exist in header
-  const missingCols = UPLOAD_REQUIRED.filter(c => colIdx[c] === -1);
-  if (missingCols.length) {
-    toast('Missing Columns', 'Required columns not found: ' + missingCols.join(', '), true);
-    return;
-  }
-
-  // Parse data rows
-  _uploadRows = [];
-  _uploadSkip = new Set();
-
-  // Duplicate key set: company + plant + visit_date (case-insensitive)
-  // Also checked against existing _visitsData records
-  const seenKeys     = new Map(); // key → first row _idx (within CSV)
-  const existingKeys = new Set(
-    (_visitsData || []).map(v =>
-      `${(v.company||'').trim().toLowerCase()}|${(v.plant||'').toLowerCase()}|${(v.visitDate||'')}`
-    )
-  );
-
-  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    const cells = parseCSVLine(lines[i]);
-    const get   = col => colIdx[col] >= 0 ? (cells[colIdx[col]] || '').trim() : '';
-
-    // ── Auto-resolve status (case-insensitive, default Scheduled) ────
-    const rawStatus   = get('status');
-    const statusMatch = STATUSES.find(s => s.toLowerCase() === (rawStatus||'').toLowerCase());
-    const resolvedStatus = statusMatch || (rawStatus ? rawStatus : 'Scheduled');
-
-    // ── Auto-resolve criticality (case-insensitive, default Medium) ──
-    const rawCritInput = get('criticality');
-    const rawCrit      = rawCritInput || 'Medium';
-    const critMatch    = CRITS.find(c => c.toLowerCase() === rawCrit.toLowerCase());
-    const resolvedCrit = critMatch || rawCrit;
-
-    // ── Auto-resolve category (case-insensitive, fallback to first) ──
-    const rawCat  = get('category') || CATEGORIES[0];
-    const catMatch = CATEGORIES.find(c => c.toLowerCase() === rawCat.toLowerCase());
-    const resolvedCat = catMatch || CATEGORIES[0];
-    const catWarning  = !catMatch ? `category "${rawCat}" unknown — auto-set to "${CATEGORIES[0]}"` : '';
-
-    const row = {
-      _idx:         _uploadRows.length,
-      _valid:       true,
-      _errors:      [],
-      _warnings:    catWarning ? [catWarning] : [],
-      confirm_date:   get('confirm_date'),
-      visit_date:     get('visit_date'),
-      visit_date_end: get('visit_date_end') || '',
-      plant:          get('plant'),
-      company:        get('company'),
-      rep:            get('rep'),
-      category:       resolvedCat,
-      criticality:    resolvedCrit,
-      focus:          get('focus'),
-      status:         resolvedStatus,
-      coordinator:    get('coordinator'),
-      attendees:      get('attendees'),
-      stay:           (get('stay')||'N').toUpperCase() === 'Y' ? 'Y' : 'N',
-      hotel:          get('hotel'),
-      remarks:        get('remarks'),
-      agenda:         get('agenda'),
-    };
-
-    // ── Blocking validation ───────────────────────────────
-    const errs = row._errors;
-
-    // 1. Required fields
-    UPLOAD_REQUIRED.forEach(col => {
-      if (!row[col]) errs.push(`"${col}" is required`);
-    });
-
-    // 2. Date format YYYY-MM-DD (no duplicates)
-    if (row.confirm_date && !dateRe.test(row.confirm_date))
-      errs.push('confirm_date must be YYYY-MM-DD');
-    if (row.visit_date && !dateRe.test(row.visit_date))
-      errs.push('visit_date must be YYYY-MM-DD');
-    if (row.visit_date_end && !dateRe.test(row.visit_date_end))
-      errs.push('visit_date_end must be YYYY-MM-DD');
-    if (row.visit_date && row.visit_date_end && row.visit_date_end < row.visit_date)
-      errs.push('visit_date_end cannot be before visit_date');
-
-    // 3. Plant must be in live PLANTS list (case-sensitive; guide user)
-    if (row.plant && !PLANTS.includes(row.plant)) {
-      const plantMatch = PLANTS.find(p => p.toLowerCase() === row.plant.toLowerCase());
-      if (plantMatch) { row.plant = plantMatch; } // auto-correct capitalisation
-      else errs.push(`plant "${row.plant}" not found — valid: ${PLANTS.join(', ')}`);
-    }
-
-    // 4. Criticality must be valid (only error if user explicitly provided a bad value)
-    if (!critMatch && rawCritInput)
-      errs.push(`criticality must be one of: ${CRITS.join(', ')} (got "${rawCritInput}")`);
-
-    // 5. Status must be valid
-    if (!statusMatch && rawStatus)
-      errs.push(`status must be one of: ${STATUSES.join(', ')} (got "${rawStatus}")`);
-
-    // 6. Duplicate detection — against existing Firestore records
-    const dupKey = `${row.company.trim().toLowerCase()}|${(row.plant||'').toLowerCase()}|${row.visit_date}`;
-    if (errs.length === 0 && existingKeys.has(dupKey)) {
-      errs.push(`duplicate: a visit for "${row.company}" at ${row.plant} on ${row.visit_date} already exists`);
-    }
-
-    // 7. Duplicate detection — within this CSV file itself
-    if (errs.length === 0) {
-      if (seenKeys.has(dupKey)) {
-        errs.push(`duplicate of row #${seenKeys.get(dupKey) + 1} in this file (same company, plant & visit date)`);
-      } else {
-        seenKeys.set(dupKey, row._idx);
-      }
-    }
-
-    row._valid = errs.length === 0;
-    _uploadRows.push(row);
-  }
-
-  if (_uploadRows.length === 0) {
-    toast('No Rows', 'No data rows found after parsing.', true); return;
-  }
-
-  renderUploadPhase2();
-}
-
-/* Minimal CSV line parser — handles quoted fields with commas/newlines */
-function parseCSVLine(line) {
-  const result = [];
-  let cur = '', inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQ && line[i+1] === '"') { cur += '"'; i++; }
-      else inQ = !inQ;
-    } else if (ch === ',' && !inQ) {
-      result.push(cur); cur = '';
-    } else {
-      cur += ch;
-    }
-  }
-  result.push(cur);
-  return result;
-}
-
-/* ─────────────────────────────────────────────────────────
-   ROW TOGGLE HELPERS
-───────────────────────────────────────────────────────── */
-function toggleUploadRow(idx) {
-  if (_uploadSkip.has(idx)) _uploadSkip.delete(idx);
-  else _uploadSkip.add(idx);
-  refreshUploadPreview();
-}
-
-function selectAllUploadRows() {
-  _uploadSkip = new Set();
-  refreshUploadPreview();
-}
-
-function skipAllErrRows() {
-  _uploadSkip = new Set();
-  _uploadRows.forEach(r => { if (!r._valid) _uploadSkip.add(r._idx); });
-  refreshUploadPreview();
-}
-
-function refreshUploadPreview() {
-  // Re-render just tbody + counts without full redraw
-  const tbody = document.getElementById('uploadTbody');
-  if (!tbody) { renderUploadPhase2(); return; }
-
-  let okCount = 0;
-  _uploadRows.forEach(r => {
-    const isSkipped = _uploadSkip.has(r._idx);
-    const tr = tbody.querySelector(`tr:nth-child(${r._idx+1})`);
-    if (!tr) return;
-
-    if (isSkipped) {
-      tr.className = 'row-skip';
-      tr.cells[1].innerHTML = '<span class="row-status-skip">— Skipped</span>';
-      tr.cells[tr.cells.length-1].innerHTML = `<button onclick="toggleUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">Include</button>`;
-    } else {
-      tr.className = r._valid ? 'row-ok' : 'row-err';
-      const statusHtml = r._valid ? '<span class="row-status-ok">✓ Ready</span>' : '<span class="row-status-err">✗ Error</span>';
-      const errHtml  = r._errors.length
-        ? `<div style="margin-top:3px"><div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div></div>` : '';
-      const warnHtml = (r._warnings && r._warnings.length)
-        ? `<div style="margin-top:2px;font-size:10px;color:var(--orange)" title="${xe(r._warnings.join('; '))}">⚠ ${r._warnings[0]}</div>` : '';
-      tr.cells[1].innerHTML = statusHtml + errHtml + warnHtml;
-      tr.cells[tr.cells.length-1].innerHTML = `<button onclick="toggleUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">Skip</button>`;
-      if (r._valid && !isSkipped) okCount++;
-    }
-  });
-
-  // Also count valid non-skipped
-  okCount = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx)).length;
-  const skipCount = _uploadSkip.size;
-
-  const okEl   = document.getElementById('upOkCount');
-  const skipEl = document.getElementById('upSkipCount');
-  const btnEl  = document.getElementById('btnDoImport');
-  const cntEl  = document.getElementById('btnImportCount');
-  if (okEl)   okEl.textContent   = okCount;
-  if (skipEl) skipEl.textContent = skipCount;
-  if (btnEl)  btnEl.disabled     = okCount === 0;
-  if (cntEl)  cntEl.textContent  = okCount;
-}
-
 /* ══════════════════════════════════════════════════════════
-   IN-APP NOTIFICATION BELL (Admin only)
-   Stored in Firestore: config/appNotifications
-   Each notification: { id, title, meta, visitId, type, time, read }
+   TEMPLATE DOWNLOAD — today-relative dates, never clashes
+   with seed data. Comment row shows valid values per column.
 ══════════════════════════════════════════════════════════ */
-const NOTIF_DOC = db.collection('config').doc('appNotifications');
-let _notifData   = []; // array of notification objects
-let _notifUnsub  = null;
-
-/* Show/hide bell icon based on role */
-function initNotifBell() {
-  const isAdmin = currentUser && currentUser.access === 'admin';
-  const btn = document.getElementById('notifBellBtn');
-  if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
-  if (!isAdmin) return;
-
-  // Start Firestore listener for notifications
-  if (_notifUnsub) _notifUnsub();
-  _notifUnsub = NOTIF_DOC.onSnapshot(doc => {
-    _notifData = (doc.exists && Array.isArray(doc.data().items)) ? doc.data().items : [];
-    renderNotifBadge();
-    renderNotifList();
-  }, err => console.warn('Notif listener error:', err));
-}
-
-function renderNotifBadge() {
-  const unread = _notifData.filter(n => !n.read).length;
-  const badge  = document.getElementById('notifBadge');
-  const btn    = document.getElementById('notifBellBtn');
-  if (!badge || !btn) return;
-  if (unread > 0) {
-    badge.textContent = unread > 99 ? '99+' : unread;
-    badge.classList.add('show');
-    btn.classList.add('has-unread');
-  } else {
-    badge.classList.remove('show');
-    btn.classList.remove('has-unread');
-  }
-}
-
-function renderNotifList() {
-  const list = document.getElementById('notifList');
-  if (!list) return;
-  if (!_notifData.length) {
-    list.innerHTML = '<div class="notif-empty">No notifications yet</div>';
-    return;
-  }
-  // Show newest first, limit to 40
-  const sorted = [..._notifData].sort((a,b) => (b.time||'').localeCompare(a.time||'')).slice(0,40);
-  list.innerHTML = sorted.map(n => `
-    <div class="notif-item ${n.read?'':'unread'}" onclick="notifItemClick('${n.id}','${n.visitId||''}')">
-      <div class="notif-dot"></div>
-      <div class="notif-item-body">
-        <div class="notif-item-title">${xe(n.title||'Notification')}</div>
-        <div class="notif-item-meta">${xe(n.meta||'')} &nbsp;·&nbsp; ${xe(n.time||'')}</div>
-      </div>
-    </div>`).join('');
-}
-
-function toggleNotifPanel() {
-  const panel = document.getElementById('notifPanel');
-  if (!panel) return;
-  panel.classList.toggle('open');
-  // Close user dropdown if open
-  document.getElementById('userDropdown')?.classList.remove('open');
-  // Mark visible as read when panel opens
-  if (panel.classList.contains('open')) {
-    setTimeout(markAllNotifsRead, 1200);
-  }
-}
-
-function notifItemClick(id, visitId) {
-  // Mark read
-  const idx = _notifData.findIndex(n => n.id === id);
-  if (idx !== -1 && !_notifData[idx].read) {
-    _notifData[idx].read = true;
-    saveNotifData();
-  }
-  // Navigate to visit if visitId provided
-  if (visitId) {
-    document.getElementById('notifPanel')?.classList.remove('open');
-    showTab('records');
-    setTimeout(() => openView(visitId), 300);
-  }
-}
-
-function markAllNotifsRead() {
-  let changed = false;
-  _notifData.forEach(n => { if (!n.read) { n.read = true; changed = true; } });
-  if (changed) { saveNotifData(); renderNotifBadge(); renderNotifList(); }
-}
-
-function clearAllNotifs() {
-  _notifData = [];
-  saveNotifData();
-  renderNotifBadge();
-  renderNotifList();
-}
-
-function saveNotifData() {
-  NOTIF_DOC.set({ items: _notifData.slice(0,200) }).catch(e => console.warn('Notif save error:', e));
-}
-
-/**
- * pushAdminNotif(title, meta, visitId, type)
- * Adds a new in-app notification for admins.
- */
-function pushAdminNotif(title, meta, visitId, type) {
-  if (!currentUser || currentUser.access !== 'admin') return;
-  const notif = {
-    id:      'n' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
-    title,
-    meta,
-    visitId: visitId || '',
-    type:    type || 'info',
-    time:    new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', hour12:true }),
-    read:    false,
-  };
-  _notifData.unshift(notif);
-  if (_notifData.length > 200) _notifData = _notifData.slice(0, 200);
-  saveNotifData();
-  renderNotifBadge();
-  renderNotifList();
-}
-
-/* Close notif panel when clicking outside */
-document.addEventListener('click', e => {
-  const wrap  = document.getElementById('notifBellWrap');
-  const panel = document.getElementById('notifPanel');
-  if (wrap && panel && panel.classList.contains('open') && !wrap.contains(e.target)) {
-    panel.classList.remove('open');
-  }
-});
-
-/* ══════════════════════════════════════════════════════════
-   FIX: saveNotificationSettings — restart digest scheduler on save
-══════════════════════════════════════════════════════════ */
-const _origSaveNotificationSettings = saveNotificationSettings;
-// Override to restart scheduler after save
-window.saveNotificationSettings = function() {
-  _settingsData.notification = {
-    enableEmail:      document.getElementById('n_enable').value === 'true',
-    ccManagement:     document.getElementById('n_cc').value === 'true',
-    managementEmail:  document.getElementById('n_mgmt_email').value.trim(),
-    subjectPrefix:    document.getElementById('n_prefix').value.trim(),
-  };
-  _settingsData.dailyDigest = {
-    ..._settingsData.dailyDigest,
-    enabled:    document.getElementById('dd_enable').value === 'true',
-    sendTime:   document.getElementById('dd_time').value || '18:00',
-    recipients: document.getElementById('dd_recipients').value.trim(),
-  };
-  saveSettings();
-  // ★ FIX: restart scheduler so new time takes effect immediately
-  stopDailyDigestScheduler();
-  if (_settingsData.dailyDigest.enabled) startDailyDigestScheduler();
-  toast('✓ Notification Config Saved', 'Email notification rules updated. Scheduler restarted.');
-};
-
-/* ══════════════════════════════════════════════════════════
-   FIX: logMail — ensure admin notif is pushed on every create/update
-   AND ensure email respects enableEmail setting
-══════════════════════════════════════════════════════════ */
-const _origLogMail = logMail;
-window.logMail = function(record, isUpdate) {
-  // Always create in-app notification for admin
-  const actionLabel = isUpdate ? '✏ Visit Updated' : '✦ New Visit Scheduled';
-  const notifTitle  = `${actionLabel}: ${record.company}`;
-  const notifMeta   = `${record.plant} · ${fmtDateRange(record.visitDate, record.visitDateEnd)} · ${record.status}`;
-  pushAdminNotif(notifTitle, notifMeta, record.id, isUpdate ? 'update' : 'create');
-
-  // Call original logMail for email + mail log
-  _origLogMail.call(this, record, isUpdate);
-};
-
-
-async function executeUploadImport() {
-  const toImport = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
-  const skipped  = _uploadSkip.size;                          // rows user explicitly skipped
-  const errors   = _uploadRows.filter(r => !r._valid).length; // rows that failed validation
-
-  if (!toImport.length) {
-    toast('Nothing to Import', 'No valid rows selected.', true); return;
-  }
-
-  // Disable button + show progress
-  const btn = document.getElementById('btnDoImport');
-  if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
-
-  // Build visit objects — generate unique IDs and stamp import metadata
-  const now = new Date().toISOString();
-
-  // Final safety net: re-check against current in-memory store to block any
-  // duplicates that may have been added since the file was parsed
-  const existingKeysNow = new Set(
-    (_visitsData || []).map(v =>
-      `${(v.company||'').trim().toLowerCase()}|${(v.plant||'').toLowerCase()}|${(v.visitDate||'')}`
-    )
-  );
-
-  const newVisits = [];
-  const latedupes = [];
-  toImport.forEach(r => {
-    const key = `${r.company.trim().toLowerCase()}|${(r.plant||'').toLowerCase()}|${r.visit_date}`;
-    if (existingKeysNow.has(key)) {
-      latedupes.push(r.company);
-    } else {
-      existingKeysNow.add(key); // prevent within-batch dupes too
-      newVisits.push({
-        id:          'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-        confirmDate:  r.confirm_date,
-        visitDate:    r.visit_date,
-        visitDateEnd: r.visit_date_end || '',
-        plant:        r.plant,
-        company:      r.company.trim(),
-        rep:          r.rep.trim(),
-        category:     r.category,
-        criticality:  r.criticality,
-        focus:        r.focus.trim(),
-        status:       r.status,
-        coordinator:  r.coordinator.trim(),
-        attendees:    r.attendees.trim(),
-        stay:         r.stay,
-        hotel:        r.hotel.trim(),
-        remarks:      r.remarks.trim(),
-        agenda:       r.agenda.trim(),
-        createdAt:    now,
-        createdBy:    currentUser.id,
-        importedAt:   now,
-      });
-    }
-  });
-
-  if (latedupes.length) {
-    console.warn('Late duplicates blocked at write time:', latedupes);
-  }
-
-  if (!newVisits.length) {
-    toast('All Duplicates', 'Every selected row is already in the database — nothing imported.', true);
-    if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
-    return;
-  }
-
-  // Firestore batched write (max 500 per batch — split if needed)
-  const BATCH_SIZE = 400;
-  try {
-    for (let i = 0; i < newVisits.length; i += BATCH_SIZE) {
-      const chunk = newVisits.slice(i, i + BATCH_SIZE);
-      const batch = db.batch();
-      chunk.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
-      await batch.commit();
-      // Show progress
-      const pct = Math.round(Math.min(((i + chunk.length) / newVisits.length) * 100, 100));
-      if (btn) btn.textContent = `Importing… ${pct}%`;
-    }
-    // Merge into in-memory store
-    _visitsData = [..._visitsData, ...newVisits];
-    updateBadges();
-    const totalBlocked = errors + skipped + latedupes.length;
-    renderUploadPhase3(newVisits.length, skipped, errors + latedupes.length);
-    const dupNote = latedupes.length ? ` (${latedupes.length} late duplicate${latedupes.length>1?'s':''} blocked)` : '';
-    toast(`✦ ${newVisits.length} Records Imported`, `Bulk upload complete${dupNote}.`);
-  } catch(e) {
-    console.error('Bulk import error:', e);
-    toast('Import Failed', e?.message || String(e), true);
-    if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
-  }
-}
-
-/* ─────────────────────────────────────────────────────────
-   TEMPLATE DOWNLOAD
-───────────────────────────────────────────────────────── */
 function downloadUploadTemplate() {
-  const headers = UPLOAD_COLS.join(',');
-  // Use today-relative dates so the example row never clashes with existing records
-  const _today = new Date();
-  const _fmt = d => d.toISOString().slice(0,10);
-  const _confirmEx = _fmt(new Date(_today.getTime() - 3*86400000));   // 3 days ago
-  const _visitEx   = _fmt(new Date(_today.getTime() + 7*86400000));   // 7 days ahead
-  const _visitEndEx= _fmt(new Date(_today.getTime() + 8*86400000));   // 8 days ahead
-  const example = [
-    _confirmEx,              // confirm_date
-    _visitEx,                // visit_date
-    _visitEndEx,             // visit_date_end  (leave blank for single-day)
-    PLANTS[0],               // plant  — matches your live plant list
-    'Tata Steel Ltd',        // company
-    'Mr. Suresh Patel',      // rep
-    CATEGORIES[0],           // category — matches your live category list
-    CRITS[2] || 'Medium',    // criticality
-    'New Order Discussion',  // focus
-    STATUSES[0],             // status — matches your live status list
-    'Rajesh Kumar',          // coordinator
-    'Engineering Head, CFO', // attendees
-    'Y',                     // stay (Y or N)
-    'Marriott Pune',         // hotel
-    'VIP client',            // remarks
-    'Discuss Q2 supply requirements and annual pricing structure', // agenda
-  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+  const pad    = n => String(n).padStart(2,'0');
+  const fmt    = d => d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  const today  = new Date();
+  const addDay = n => { const d = new Date(today); d.setDate(d.getDate()+n); return d; };
+  const esc    = v => '"' + String(v).replace(/"/g,'""') + '"';
 
-  // Add a helper comment row so users know valid values
-  const hint = [
-    'YYYY-MM-DD','YYYY-MM-DD','YYYY-MM-DD (optional)',
-    PLANTS.join(' | '),
-    '','',
-    CATEGORIES.join(' | '),
-    CRITS.join(' | '),
-    '',
-    STATUSES.join(' | '),
-    '','',
-    'Y or N','','',''
-  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+  // 3 example rows, future dates, different plants — guaranteed no duplicates
+  const examples = [
+    [fmt(addDay(3)),  fmt(addDay(14)), '',               PLANTS[0]||'Pune',
+     'Acme Industries Ltd',  'Mr. Rahul Sharma',  CATEGORIES[0], 'High',
+     'New Order Discussion', 'Scheduled',          'Coordinator A',
+     'Head of Sales, CFO',  'Y', 'Marriott Hotel', 'VIP client',
+     'Discuss Q2 supply requirements and annual contract renewal'],
 
-  const csv = headers + '\n' + example + '\n';
-  const a   = document.createElement('a');
-  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    [fmt(addDay(5)),  fmt(addDay(21)), fmt(addDay(22)),  PLANTS[1]||'Chennai',
+     'Beta Technologies',    'Ms. Priya Nair',    CATEGORIES[1], 'Medium',
+     'Quality Audit',        'Scheduled',          'Coordinator B',
+     'Quality Head, Plant Manager', 'N', '', 'Prepare QC reports',
+     'Annual quality walkthrough and process assessment at plant floor'],
+
+    [fmt(addDay(7)),  fmt(addDay(30)), '',               PLANTS[2]||'Ahmedabad',
+     'Gamma Corp Pvt Ltd',   'Mr. Anil Mehta',    CATEGORIES[2], 'Low',
+     'Product Demo',         'Confirmed',          'Coordinator C',
+     'Engineering team (6)', 'N', '', '',
+     'Demonstration of new product line for engineering and procurement teams'],
+  ];
+
+  const hintRow = [
+    'YYYY-MM-DD','YYYY-MM-DD','YYYY-MM-DD or blank',
+    PLANTS.join(' | '), 'Company name', 'Rep name',
+    CATEGORIES.join(' | '), CRITS.join(' | '), 'Visit purpose',
+    STATUSES.join(' | '), 'Coordinator name', 'Attendee names',
+    'Y or N', 'Hotel name or blank', 'Any remarks', 'Meeting agenda',
+  ];
+
+  const csvLines = [
+    UPLOAD_COLS.join(','),
+    '# VALID VALUES: ' + hintRow.map(esc).join(','),
+    ...examples.map(row => row.map(esc).join(',')),
+  ];
+
+  const a    = document.createElement('a');
+  a.href     = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvLines.join('\n'));
   a.download = 'plantvisit_bulk_upload_template.csv';
   a.click();
-  toast('Template Downloaded', `Valid statuses: ${STATUSES.join(', ')} · Plants: ${PLANTS.join(', ')}`);
+  toast('Template Downloaded', 'Plants: ' + PLANTS.join(', ') + ' · Statuses: ' + STATUSES.join(', '));
 }
 
 </script>
