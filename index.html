@@ -4717,7 +4717,7 @@ function parseUploadCSV(text) {
       category:     get('category') || CATEGORIES[0],
       criticality:  get('criticality') || 'Medium',
       focus:        get('focus'),
-      status:       get('status') || 'Scheduled',
+      status:       (() => { const raw = get('status'); if (!raw) return 'Scheduled'; const match = STATUSES.find(s => s.toLowerCase() === raw.toLowerCase()); return match || raw; })(),
       coordinator:  get('coordinator'),
       attendees:    get('attendees'),
       stay:         (get('stay')||'N').toUpperCase() === 'Y' ? 'Y' : 'N',
@@ -4753,13 +4753,19 @@ function parseUploadCSV(text) {
     if (row.plant && !PLANTS.includes(row.plant))
       errs.push(`plant "${row.plant}" not found — valid: ${PLANTS.join(', ')}`);
 
-    // Criticality
-    if (row.criticality && !CRITS.includes(row.criticality))
-      errs.push(`criticality must be one of: ${CRITS.join(', ')}`);
+    // Criticality — case-insensitive match; auto-correct capitalisation
+    if (row.criticality) {
+      const critMatch = CRITS.find(c => c.toLowerCase() === row.criticality.toLowerCase());
+      if (critMatch) { row.criticality = critMatch; }
+      else errs.push(`criticality must be one of: ${CRITS.join(', ')} (got "${row.criticality}")`);
+    }
 
-    // Status
-    if (row.status && !STATUSES.includes(row.status))
-      errs.push(`status must be one of: ${STATUSES.join(', ')}`);
+    // Status — case-insensitive match; auto-correct capitalisation
+    if (row.status) {
+      const statusMatch = STATUSES.find(s => s.toLowerCase() === row.status.toLowerCase());
+      if (statusMatch) { row.status = statusMatch; }
+      else errs.push(`status must be one of: ${STATUSES.join(', ')} (got "${row.status}")`);
+    }
 
     // Category — warn but don't block
     if (row.category && !CATEGORIES.includes(row.category)) {
