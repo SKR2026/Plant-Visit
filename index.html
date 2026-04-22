@@ -90,10 +90,11 @@ body{background:var(--navy);color:var(--white);font-family:var(--font);font-size
   background:var(--navy2);
   border:1px solid var(--border2);
   border-radius:20px;
-  padding:40px 44px;
+  padding:40px 44px 32px;
   width:min(420px,96vw);
   box-shadow:0 20px 60px rgba(0,0,0,.5);
   animation:slideUp .3s ease;
+  position:relative;
 }
 .login-logo {
   text-align:center;
@@ -153,6 +154,73 @@ body{background:var(--navy);color:var(--white);font-family:var(--font);font-size
   border-radius:var(--radius);font-size:11px;color:var(--blue);
   text-align:center;
 }
+
+/* ─── DEBUG MODE ─────────────────────────────────────── */
+.debug-toggle {
+  position:absolute;bottom:10px;right:14px;
+  font-size:10px;color:var(--navy5);cursor:pointer;
+  user-select:none;letter-spacing:.3px;
+  transition:color .2s;
+}
+.debug-toggle:hover{color:var(--slate)}
+.debug-panel {
+  display:none;margin-top:20px;
+  border:1px solid rgba(155,114,232,.3);
+  border-radius:var(--radius-lg);overflow:hidden;
+  font-size:11px;
+}
+.debug-panel.open{display:block}
+.debug-panel-head {
+  background:rgba(155,114,232,.12);
+  padding:8px 12px;display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid rgba(155,114,232,.2);
+}
+.debug-panel-head-title{color:var(--purple);font-weight:600;flex:1;letter-spacing:.3px}
+.debug-fs-dot {
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+  background:var(--slate);transition:background .3s;
+}
+.debug-fs-dot.live{background:var(--green);animation:fb-pulse-green 2s ease-in-out infinite}
+.debug-fs-dot.error{background:var(--red)}
+.debug-fs-label{font-size:10px;color:var(--slate2)}
+.debug-body{background:var(--navy);padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.debug-section-title{
+  font-size:9px;font-weight:600;color:var(--purple);
+  text-transform:uppercase;letter-spacing:.8px;
+  margin-bottom:5px;border-bottom:1px solid rgba(155,114,232,.15);padding-bottom:3px;
+}
+.debug-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 0}
+.debug-key{color:var(--slate2);font-size:10px}
+.debug-val{color:var(--white2);font-size:10px;font-weight:500;text-align:right;max-width:55%}
+.debug-val.ok{color:var(--green)}
+.debug-val.warn{color:var(--orange)}
+.debug-val.err{color:var(--red)}
+.debug-val.pending{color:var(--slate);font-style:italic}
+.debug-user-row{
+  display:flex;align-items:center;gap:6px;
+  padding:4px 6px;border-radius:4px;
+  background:rgba(255,255,255,.03);margin-bottom:3px;
+}
+.debug-user-id{color:var(--gold);font-family:monospace;font-size:10px;min-width:72px}
+.debug-user-role{color:var(--slate2);font-size:9px;flex:1}
+.debug-user-src{
+  font-size:8px;padding:1px 6px;border-radius:10px;font-weight:600;letter-spacing:.3px;
+}
+.debug-user-src.default{background:rgba(136,136,170,.15);color:var(--slate2)}
+.debug-user-src.firestore{background:var(--blue-bg);color:var(--blue)}
+.debug-user-src.override{background:var(--purple-bg);color:var(--purple)}
+.debug-log{
+  background:rgba(0,0,0,.3);border-radius:var(--radius);
+  padding:6px 8px;max-height:90px;overflow-y:auto;
+  font-family:monospace;font-size:10px;color:var(--slate2);
+  display:flex;flex-direction:column;gap:2px;
+}
+.debug-log-entry{display:flex;gap:6px}
+.debug-log-time{color:var(--navy5);flex-shrink:0}
+.debug-log-entry.ok .debug-log-msg{color:var(--green)}
+.debug-log-entry.err .debug-log-msg{color:var(--red)}
+.debug-log-entry.warn .debug-log-msg{color:var(--orange)}
+.debug-log-entry.info .debug-log-msg{color:var(--slate2)}
 
 /* ─── HEADER ─────────────────────────────────────────── */
 .header {
@@ -747,6 +815,58 @@ html.guest-direct-link #mainContent { display: block !important; }
     <div class="login-direct-info" id="loginDirectInfo" style="display:none">
       🔗 Opening visit record from notification email…
     </div>
+
+    <!-- ─── DEBUG PANEL ─── -->
+    <div class="debug-panel" id="debugPanel">
+      <div class="debug-panel-head">
+        <div class="debug-fs-dot" id="dbgFsDot"></div>
+        <span class="debug-panel-head-title">🐛 Debug Mode</span>
+        <span class="debug-fs-label" id="dbgFsLabel">Connecting…</span>
+      </div>
+      <div class="debug-body">
+
+        <div>
+          <div class="debug-section-title">Firestore Listeners</div>
+          <div class="debug-row">
+            <span class="debug-key">Connection</span>
+            <span class="debug-val" id="dbgFsConn">—</span>
+          </div>
+          <div class="debug-row">
+            <span class="debug-key">appUsersMeta</span>
+            <span class="debug-val" id="dbgMetaReady">—</span>
+          </div>
+          <div class="debug-row">
+            <span class="debug-key">appDefaultOverrides</span>
+            <span class="debug-val" id="dbgOverridesReady">—</span>
+          </div>
+          <div class="debug-row">
+            <span class="debug-key">appUsers (custom)</span>
+            <span class="debug-val" id="dbgUsersCache">—</span>
+          </div>
+          <div class="debug-row">
+            <span class="debug-key">Deleted defaults</span>
+            <span class="debug-val" id="dbgDeleted">—</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="debug-section-title">Loaded Users</div>
+          <div id="dbgUserList"></div>
+        </div>
+
+        <div>
+          <div class="debug-section-title">Login Log</div>
+          <div class="debug-log" id="dbgLog">
+            <div class="debug-log-entry info">
+              <span class="debug-log-time">--:--:--</span>
+              <span class="debug-log-msg">Debug panel opened. Waiting for Firestore…</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="debug-toggle" id="debugToggleBtn" onclick="toggleDebugPanel()" title="Toggle debug panel">⚙ debug</div>
     <div id="guestBtnWrap" style="margin-top:10px">
       <div style="display:flex;align-items:center;gap:10px;margin:14px 0 10px">
         <div style="flex:1;height:1px;background:var(--border2)"></div>
@@ -893,6 +1013,10 @@ let _fbSyncTimer = null;
 function setFbStatus(state, detail) {
   _fbStatus = state;
   if (state === 'live') _fbLastSync = new Date();
+
+  // Debug log for status changes
+  if (state === 'live')  dbgLog('🔥 Firestore connected — live sync active', 'ok');
+  if (state === 'error') dbgLog('⚠ Firestore error — offline mode', 'err');
 
   const pill  = document.getElementById('fbStatusPill');
   const label = document.getElementById('fbStatusLabel');
@@ -1170,7 +1294,15 @@ function initFirestoreListeners() {
     // Wait until both snapshots have fired at least once before rebuilding.
     // This prevents appUsers from building with empty _deletedDefaultUsers
     // because appUsersMeta hasn't arrived yet.
-    if (_fsUsersCache === null || !_fsMetaReady || !_fsOverridesReady) return;
+    if (_fsUsersCache === null || !_fsMetaReady || !_fsOverridesReady) {
+      // Expose partial state so debug panel can show what's still pending
+      window._dbgState = {
+        metaReady: _fsMetaReady, overridesReady: _fsOverridesReady,
+        usersCache: _fsUsersCache !== null ? Object.keys(_fsUsersCache).length : null,
+        overrideIds: Object.keys(_fsOverrides||{}),
+      };
+      return;
+    }
 
     // Build base: DEFAULT_USERS minus Firestore-confirmed deletions
     const base = {};
@@ -1204,6 +1336,15 @@ function initFirestoreListeners() {
     // (localStorage is only written, never re-read to populate _usersData after boot)
 
     _usersData = merged;
+
+    // Expose state for debug panel
+    window._dbgState = {
+      metaReady: _fsMetaReady, overridesReady: _fsOverridesReady,
+      usersCache: _fsUsersCache !== null ? Object.keys(_fsUsersCache).length : null,
+      overrideIds: Object.keys(_fsOverrides||{}),
+    };
+    dbgLog(`Users rebuilt: ${Object.keys(merged).length} total (${Object.keys(_fsUsersCache||{}).length} from FS, ${Object.keys(_fsOverrides||{}).length} override(s))`, 'ok');
+    refreshDebugPanel();
 
     // Update localStorage cache for same-device fast boot only
     const customOnly = {};
@@ -1437,6 +1578,103 @@ function autoLoginGuest(visitId) {
   // If no visitId (dashboard link) — activateSession already called showTab('dashboard')
 }
 
+/* ══════════════════════════════════════════════════════════
+   DEBUG MODE — Login panel diagnostics (Firestore stays live)
+══════════════════════════════════════════════════════════ */
+let _debugOpen = false;
+const _dbgLog = [];
+
+function toggleDebugPanel() {
+  _debugOpen = !_debugOpen;
+  document.getElementById('debugPanel').classList.toggle('open', _debugOpen);
+  document.getElementById('debugToggleBtn').style.color = _debugOpen ? 'var(--purple)' : '';
+  if (_debugOpen) refreshDebugPanel();
+}
+
+function _dbgTime() {
+  return new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+function dbgLog(msg, type = 'info') {
+  _dbgLog.unshift({ t: _dbgTime(), msg, type });
+  if (_dbgLog.length > 30) _dbgLog.pop();
+  if (_debugOpen) _renderDbgLog();
+}
+
+function _renderDbgLog() {
+  const el = document.getElementById('dbgLog');
+  if (!el) return;
+  el.innerHTML = _dbgLog.map(e =>
+    `<div class="debug-log-entry ${e.type}">
+       <span class="debug-log-time">${e.t}</span>
+       <span class="debug-log-msg">${e.msg}</span>
+     </div>`
+  ).join('');
+}
+
+function refreshDebugPanel() {
+  if (!_debugOpen) return;
+
+  // ── Firestore status ─────────────────────────────────
+  const dot   = document.getElementById('dbgFsDot');
+  const label = document.getElementById('dbgFsLabel');
+  const conn  = document.getElementById('dbgFsConn');
+  if (dot && label && conn) {
+    dot.className   = 'debug-fs-dot ' + _fbStatus;
+    label.textContent = { connecting:'Connecting…', live:'Firebase Live ✓', error:'Offline ✗' }[_fbStatus] || _fbStatus;
+    conn.textContent  = { connecting:'Connecting', live:'Live', error:'Error / Offline' }[_fbStatus] || _fbStatus;
+    conn.className    = 'debug-val ' + (_fbStatus==='live'?'ok':_fbStatus==='error'?'err':'pending');
+  }
+
+  // ── Listener readiness ────────────────────────────────
+  const setVal = (id, text, cls) => {
+    const el = document.getElementById(id); if (!el) return;
+    el.textContent = text; el.className = 'debug-val ' + cls;
+  };
+
+  // _fsMetaReady & _fsOverridesReady are inner-scope vars in initFirestoreListeners,
+  // so we expose them via the window._dbgState object (set below)
+  const s = window._dbgState || {};
+  setVal('dbgMetaReady',      s.metaReady     ? 'Ready ✓' : 'Waiting…',  s.metaReady     ? 'ok' : 'pending');
+  setVal('dbgOverridesReady', s.overridesReady? 'Ready ✓' : 'Waiting…',  s.overridesReady? 'ok' : 'pending');
+
+  const cacheCount = s.usersCache !== null
+    ? (s.usersCache === 0 ? '0 custom users' : `${s.usersCache} custom user(s)`)
+    : 'Waiting…';
+  setVal('dbgUsersCache', cacheCount, s.usersCache !== null ? 'ok' : 'pending');
+
+  const deleted = (typeof _deletedDefaultUsers !== 'undefined' && _deletedDefaultUsers.length)
+    ? _deletedDefaultUsers.join(', ')
+    : 'None';
+  setVal('dbgDeleted', deleted, 'ok');
+
+  // ── User list ─────────────────────────────────────────
+  const listEl = document.getElementById('dbgUserList');
+  if (listEl) {
+    const entries = Object.entries(_usersData || {});
+    if (!entries.length) {
+      listEl.innerHTML = `<div style="font-size:10px;color:var(--slate);font-style:italic">No users loaded yet…</div>`;
+    } else {
+      listEl.innerHTML = entries.map(([id, u]) => {
+        const isDefault  = !!DEFAULT_USERS[id];
+        const isOverride = isDefault && s.overrideIds && s.overrideIds.includes(id);
+        const srcLabel   = isOverride ? 'override' : isDefault ? 'default' : 'firestore';
+        const srcText    = isOverride ? 'FS override' : isDefault ? 'default' : 'Firestore';
+        return `<div class="debug-user-row">
+          <span class="debug-user-id">${id}</span>
+          <span class="debug-user-role">${u.role || '—'}</span>
+          <span class="debug-user-src ${srcLabel}">${srcText}</span>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  _renderDbgLog();
+}
+
+// Poll the debug panel every 1.5 s while it's open
+setInterval(() => { if (_debugOpen) refreshDebugPanel(); }, 1500);
+
 function doLogin() {
   const username = document.getElementById('loginUser').value.trim().toLowerCase();
   const password = document.getElementById('loginPass').value;
@@ -1458,6 +1696,18 @@ function doLogin() {
 
   // Check password — also check against appDefaultOverrides for default accounts
   const pwdOk = user && (user.password === password);
+
+  // ── Debug logging ────────────────────────────────────
+  dbgLog(`Attempt: "${username}" — user ${user ? 'found' : 'NOT found'} in _usersData`, user ? 'info' : 'err');
+  if (user && !pwdOk) dbgLog(`Password mismatch for "${username}"`, 'err');
+  if (!pwdOk && !user) {
+    const inDefault = !!DEFAULT_USERS[username];
+    const loadedCount = Object.keys(_usersData||{}).length;
+    dbgLog(`_usersData has ${loadedCount} users | in DEFAULT_USERS: ${inDefault} | FS ready: ${!!(window._dbgState?.metaReady && window._dbgState?.overridesReady)}`, 'warn');
+  }
+  if (user && pwdOk) dbgLog(`✓ Login success: "${username}" (${user.role})`, 'ok');
+  // ─────────────────────────────────────────────────────
+
   if (!user || !pwdOk) {
     errEl.textContent = 'Invalid username or password. Please try again.';
     errEl.classList.add('show');
