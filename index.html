@@ -4009,7 +4009,7 @@ function renderRecords(el) {
       ${STATUSES.map(s=>`<option${pf.status===s?' selected':''}>${s}</option>`).join('')}
     </select>
     <button class="btn btn-gold btn-sm" onclick="showTab('new')">+ New Visit</button>
-    ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export CSV</button><button class="btn btn-ghost btn-sm" onclick="exportPDF()" style="color:var(--red);border-color:rgba(224,85,85,.3)">⬇ Export PDF</button>`:''}
+    ${isAdmin?`<button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export CSV</button><button class="btn btn-ghost btn-sm" onclick="exportPDF()" style="color:var(--red);border-color:rgba(224,85,85,.3)">⬇ Export PDF</button><button class="btn btn-ghost btn-sm" onclick="showTab('upload')" title="Bulk import visit records from CSV" style="color:var(--gold);border-color:var(--gold-bdr)">📤 Bulk Import</button>`:''}
   </div>
   ${isAdmin ? `
   <div class="bulk-bar" id="bulkBar">
@@ -4379,9 +4379,12 @@ document.addEventListener('DOMContentLoaded', () => {
 ══════════════════════════════════════════════════════════ */
 
 /* ── State ─────────────────────────────────────────────── */
-let _uploadRows   = [];   // parsed rows from CSV
-let _uploadPhase  = 1;    // 1=upload, 2=preview, 3=done
-let _uploadSkip   = new Set(); // row indices manually excluded by admin
+let _uploadRows       = [];   // parsed rows from CSV
+let _uploadPhase      = 1;    // 1=upload, 2=preview, 3=done
+let _uploadSkip       = new Set(); // row indices manually excluded by admin
+let _uploadDupMode    = 'skip';    // 'skip' | 'overwrite' — how to handle duplicates
+let _importedIds      = [];        // IDs written in the last import (for rollback)
+let _lastImportBatch  = null;      // { ids, timestamp } for undo
 
 /* ── CSV Template column order ──────────────────────────
    confirm_date, visit_date, plant, company, rep,
@@ -4405,12 +4408,21 @@ function renderBulkUpload(el) {
   _uploadPhase = 1;
   _uploadRows  = [];
   _uploadSkip  = new Set();
+  _uploadDupMode = 'skip';
+
+  const undoBanner = _lastImportBatch
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--orange-bg);border:1px solid rgba(224,133,64,.25);border-radius:var(--radius);margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;color:var(--orange)">↩ <strong>Last import:</strong> ${_lastImportBatch.count} record${_lastImportBatch.count!==1?'s':''} added on ${_lastImportBatch.time}</div>
+        <button class="btn btn-ghost btn-sm" onclick="rollbackLastImport()" style="border-color:var(--orange);color:var(--orange)">↩ Undo Last Import</button>
+      </div>`
+    : '';
 
   el.innerHTML = `
   <div class="section-header">
     <div class="section-title">📤 Bulk Upload Visits</div>
     <div class="section-sub">Import multiple visit records from a CSV file — Super Admin only</div>
   </div>
+  ${undoBanner}
   <div id="uploadBody"></div>`;
 
   renderUploadPhase1();
@@ -4494,6 +4506,11 @@ function renderUploadPhase2() {
   const okRows  = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
   const errRows = _uploadRows.filter(r => !r._valid);
   const skipCnt = _uploadSkip.size;
+  const dupCount = _uploadRows.filter(r => r._valid && _visitsData.some(v =>
+    v.company && v.plant && v.visitDate &&
+    v.company.trim().toLowerCase() === (r.company||'').trim().toLowerCase() &&
+    v.plant === r.plant && v.visitDate === r.visit_date
+  )).length;
 
   const rows = _uploadRows.map(r => {
     const isSkipped = _uploadSkip.has(r._idx);
@@ -4510,6 +4527,16 @@ function renderUploadPhase2() {
       style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">
       ${isSkipped?'Include':'Skip'}
     </button>`;
+    // Duplicate detection: check if same company+plant+visit_date already exists
+    const isDup = _visitsData.some(v =>
+      v.company && v.plant && v.visitDate &&
+      v.company.trim().toLowerCase() === (r.company||'').trim().toLowerCase() &&
+      v.plant === r.plant &&
+      v.visitDate === r.visit_date
+    );
+    const dupCell = isDup
+      ? `<span style="font-size:10px;color:var(--orange);font-weight:600" title="A visit for this company/plant/date already exists">⚠ Dup</span>`
+      : `<span style="font-size:10px;color:var(--slate)">—</span>`;
 
     return `<tr class="${rowClass}">
       <td style="color:var(--slate);font-size:10px">${r._idx+1}</td>
@@ -4523,6 +4550,7 @@ function renderUploadPhase2() {
       <td>${r.criticality?critBadge(r.criticality):''}</td>
       <td>${r.status?statusBadge(r.status):''}</td>
       <td style="white-space:nowrap">${r.stay==='Y'?'<span class="badge badge-medium">Yes</span>':'No'}</td>
+      <td>${dupCell}</td>
       <td>${toggleBtn}</td>
     </tr>`;
   }).join('');
@@ -4557,10 +4585,19 @@ function renderUploadPhase2() {
         <div class="import-stat-label">Validation Errors</div>
       </div>
       <div class="import-stat">
+        <div class="import-stat-num" style="color:var(--orange)">${dupCount}</div>
+        <div class="import-stat-label">Duplicates Found</div>
+      </div>
+      <div class="import-stat">
         <div class="import-stat-num" style="color:var(--slate)" id="upSkipCount">${skipCnt}</div>
         <div class="import-stat-label">Skipped</div>
       </div>
     </div>
+
+    ${dupCount ? `<div class="alert alert-warn" style="margin-bottom:14px">
+      ⚠ <strong>${dupCount} potential duplicate${dupCount>1?'s':''} detected</strong> — rows where same company, plant &amp; visit date already exist.
+      Use the <strong>Duplicates</strong> selector below to skip or overwrite them.
+    </div>` : ''}
 
     ${errRows.length ? `<div class="alert alert-warn" style="margin-bottom:14px">
       ⚠ <strong>${errRows.length} row${errRows.length>1?'s have':' has'} validation errors</strong> and will be excluded from import.
@@ -4575,7 +4612,7 @@ function renderUploadPhase2() {
             <th>#</th><th>Status</th>
             <th>Confirm Date</th><th>Visit Date</th><th>Plant</th>
             <th>Company</th><th>Rep</th><th>Category</th>
-            <th>Criticality</th><th>Status</th><th>Stay</th><th></th>
+            <th>Criticality</th><th>Status</th><th>Stay</th><th>Dup?</th><th></th>
           </tr>
         </thead>
         <tbody id="uploadTbody">${rows}</tbody>
@@ -4584,14 +4621,25 @@ function renderUploadPhase2() {
 
     <!-- Actions -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;flex-wrap:wrap;gap:10px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-ghost btn-sm" onclick="selectAllUploadRows()">Include All</button>
         <button class="btn btn-ghost btn-sm" onclick="skipAllErrRows()">Skip Errors Only</button>
+        ${errRows.length ? `<button class="btn btn-ghost btn-sm" onclick="exportUploadErrors()" title="Download invalid rows as CSV with error notes" style="color:var(--orange);border-color:var(--orange)">⬇ Export Errors (${errRows.length})</button>` : ''}
       </div>
-      <button class="btn btn-gold" id="btnDoImport" onclick="executeUploadImport()"
-        ${okRows.length===0?'disabled':''}>
-        ✦ Import <span id="btnImportCount">${okRows.length}</span> Record${okRows.length!==1?'s':''}
-      </button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--slate2)">
+          <span>Duplicates:</span>
+          <select id="dupModeSelect" onchange="_uploadDupMode=this.value"
+            style="padding:4px 8px;background:var(--navy3);border:1px solid var(--border);border-radius:var(--radius);color:var(--white);font-size:12px">
+            <option value="skip" ${_uploadDupMode==='skip'?'selected':''}>Skip existing</option>
+            <option value="overwrite" ${_uploadDupMode==='overwrite'?'selected':''}>Overwrite existing</option>
+          </select>
+        </div>
+        <button class="btn btn-gold" id="btnDoImport" onclick="executeUploadImport()"
+          ${okRows.length===0?'disabled':''}>
+          ✦ Import <span id="btnImportCount">${okRows.length}</span> Record${okRows.length!==1?'s':''}
+        </button>
+      </div>
     </div>
   </div>`;
 }
@@ -4599,7 +4647,7 @@ function renderUploadPhase2() {
 /* ─────────────────────────────────────────────────────────
    PHASE 3 — Import result summary
 ───────────────────────────────────────────────────────── */
-function renderUploadPhase3(imported, skipped, errors) {
+function renderUploadPhase3(imported, skipped, errors, summary) {
   _uploadPhase = 3;
   const el = document.getElementById('uploadBody');
   if (!el) return;
@@ -4632,13 +4680,15 @@ function renderUploadPhase3(imported, skipped, errors) {
       </div>
     </div>
     <div class="alert alert-success" style="color:var(--green);background:var(--green-bg);border:1px solid rgba(90,191,122,.2);margin-bottom:16px">
-      ✅ <strong>${imported} visit record${imported!==1?'s':''}</strong> successfully imported and synced to Firebase Firestore.
+      ✅ ${summary || `<strong>${imported} visit record${imported!==1?'s':''}</strong> successfully imported and synced to Firebase Firestore.`}
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-gold" onclick="showTab('records')">View Records →</button>
       <button class="btn btn-ghost" onclick="renderBulkUpload(document.getElementById('mainContent'))">Upload Another File</button>
+      ${_lastImportBatch ? `<button class="btn btn-ghost" onclick="rollbackLastImport()" style="color:var(--orange);border-color:var(--orange)">↩ Undo This Import (${_lastImportBatch.count} records)</button>` : ''}
     </div>
   </div>`;
+}
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -5036,70 +5086,219 @@ window.logMail = function(record, isUpdate) {
 
 
 async function executeUploadImport() {
-  const toImport = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
-  const skipped  = _uploadRows.filter(r => _uploadSkip.has(r._idx)).length;
-  const errors   = _uploadRows.filter(r => !r._valid).length;
+  const dupMode   = _uploadDupMode || 'skip';
+  const toImport  = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
+  const skipped   = _uploadRows.filter(r => _uploadSkip.has(r._idx)).length;
+  const errors    = _uploadRows.filter(r => !r._valid).length;
 
   if (!toImport.length) {
     toast('Nothing to Import', 'No valid rows selected.', true); return;
   }
 
-  // Disable button + show progress
+  // Disable button + show progress bar
   const btn = document.getElementById('btnDoImport');
-  if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
 
-  // Build visit objects
+  // Inject a live progress bar below the preview table
+  const previewCard = document.querySelector('#uploadBody .card:last-child');
+  let progEl = document.getElementById('importProgressBar');
+  if (!progEl && previewCard) {
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <div id="importProgressWrap" style="margin-top:16px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--slate2);margin-bottom:6px">
+          <span id="importProgLabel">Starting import…</span>
+          <span id="importProgPct">0%</span>
+        </div>
+        <div style="background:var(--navy4);border-radius:4px;height:6px;overflow:hidden">
+          <div id="importProgressBar" style="height:100%;background:var(--gold);border-radius:4px;width:0;transition:width .2s"></div>
+        </div>
+        <div id="importProgDetail" style="font-size:11px;color:var(--slate);margin-top:4px"></div>
+      </div>`;
+    previewCard.appendChild(div);
+    progEl = document.getElementById('importProgressBar');
+  }
+
+  const setProgress = (pct, label, detail) => {
+    if (progEl) progEl.style.width = pct + '%';
+    const lbl = document.getElementById('importProgLabel');
+    const pctEl = document.getElementById('importProgPct');
+    const det = document.getElementById('importProgDetail');
+    if (lbl) lbl.textContent = label || '';
+    if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+    if (det && detail) det.textContent = detail;
+    if (btn) btn.textContent = `Importing… ${Math.round(pct)}%`;
+  };
+
   const now = new Date().toISOString();
-  const newVisits = toImport.map(r => ({
-    id:          'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-    confirmDate: r.confirm_date,
+  let newAdded = 0, dupOverwritten = 0, dupSkipped = 0;
+  const importedIds = [];
+
+  // Separate duplicates vs fresh records
+  const freshRows = [];
+  const dupRows   = [];
+  toImport.forEach(r => {
+    const existing = _visitsData.find(v =>
+      v.company && v.plant && v.visitDate &&
+      v.company.trim().toLowerCase() === r.company.trim().toLowerCase() &&
+      v.plant === r.plant && v.visitDate === r.visit_date
+    );
+    if (existing) {
+      if (dupMode === 'overwrite') dupRows.push({ r, existingId: existing.id });
+      else dupSkipped++;
+    } else {
+      freshRows.push(r);
+    }
+  });
+
+  const buildVisit = (r, id) => ({
+    id,
+    confirmDate:  r.confirm_date,
     visitDate:    r.visit_date,
     visitDateEnd: r.visit_date_end || '',
-    plant:       r.plant,
-    company:     r.company.trim(),
-    rep:         r.rep.trim(),
-    category:    r.category,
-    criticality: r.criticality,
-    focus:       r.focus.trim(),
-    status:      r.status,
-    coordinator: r.coordinator.trim(),
-    attendees:   r.attendees.trim(),
-    stay:        r.stay,
-    hotel:       r.hotel.trim(),
-    remarks:     r.remarks.trim(),
-    agenda:      r.agenda.trim(),
-    createdAt:   now,
-    createdBy:   currentUser.id,
-    importedAt:  now,
-  }));
+    plant:        r.plant,
+    company:      r.company.trim(),
+    rep:          r.rep.trim(),
+    category:     r.category,
+    criticality:  r.criticality,
+    focus:        r.focus.trim(),
+    status:       r.status,
+    coordinator:  r.coordinator.trim(),
+    attendees:    r.attendees.trim(),
+    stay:         r.stay,
+    hotel:        r.hotel.trim(),
+    remarks:      r.remarks.trim(),
+    agenda:       r.agenda.trim(),
+    createdAt:    now,
+    createdBy:    currentUser.id,
+    importedAt:   now,
+  });
 
-  // Firestore batched write (max 500 per batch — split if needed)
   const BATCH_SIZE = 400;
   try {
+    // ── Write fresh records ─────────────────────────────
+    const newVisits = freshRows.map(r => buildVisit(r, 'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7)));
     for (let i = 0; i < newVisits.length; i += BATCH_SIZE) {
       const chunk = newVisits.slice(i, i + BATCH_SIZE);
       const batch = db.batch();
       chunk.forEach(v => batch.set(db.collection(VISITS_COL).doc(v.id), v));
       await batch.commit();
-      // Show progress
-      const pct = Math.round(Math.min(((i + chunk.length) / newVisits.length) * 100, 100));
-      if (btn) btn.textContent = `Importing… ${pct}%`;
+      newAdded += chunk.length;
+      chunk.forEach(v => importedIds.push(v.id));
+      const pct = ((newAdded + dupOverwritten) / (freshRows.length + dupRows.length)) * 90;
+      setProgress(pct, `Importing new records…`, `${newAdded} of ${freshRows.length} written`);
     }
-    // Merge into in-memory store
-    _visitsData = [..._visitsData, ...newVisits];
+
+    // ── Overwrite duplicates if mode = overwrite ────────
+    for (let i = 0; i < dupRows.length; i += BATCH_SIZE) {
+      const chunk = dupRows.slice(i, i + BATCH_SIZE);
+      const batch = db.batch();
+      chunk.forEach(({ r, existingId }) => {
+        const v = buildVisit(r, existingId);
+        v.updatedAt = now;
+        v.updatedBy = currentUser.id;
+        batch.set(db.collection(VISITS_COL).doc(existingId), v);
+        importedIds.push(existingId);
+      });
+      await batch.commit();
+      dupOverwritten += chunk.length;
+      const pct = ((newAdded + dupOverwritten) / (freshRows.length + dupRows.length)) * 90;
+      setProgress(pct, `Overwriting duplicates…`, `${dupOverwritten} of ${dupRows.length} overwritten`);
+    }
+
+    setProgress(100, '✓ Import complete', '');
+
+    // ── Merge into in-memory store ──────────────────────
+    newVisits.forEach(v => _visitsData.push(v));
+    dupRows.forEach(({ r, existingId }) => {
+      const idx = _visitsData.findIndex(v => v.id === existingId);
+      if (idx !== -1) _visitsData[idx] = buildVisit(r, existingId);
+    });
     updateBadges();
-    renderUploadPhase3(toImport.length, skipped, errors);
-    toast(`✦ ${toImport.length} Records Imported`, `Bulk upload complete — ${toImport.length} visit${toImport.length!==1?'s':''} added.`);
+
+    // ── Track rollback info ─────────────────────────────
+    _importedIds = importedIds.filter((id, i, a) => a.indexOf(id) === i); // dedupe
+    _lastImportBatch = {
+      ids:   [..._importedIds],
+      count: newAdded + dupOverwritten,
+      time:  new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', hour12:true }),
+    };
+
+    const summary = [
+      newAdded > 0         ? `${newAdded} new record${newAdded!==1?'s':''} added` : '',
+      dupOverwritten > 0   ? `${dupOverwritten} duplicate${dupOverwritten!==1?'s':''} overwritten` : '',
+      dupSkipped > 0       ? `${dupSkipped} duplicate${dupSkipped!==1?'s':''} skipped` : '',
+    ].filter(Boolean).join(', ');
+
+    renderUploadPhase3(newAdded + dupOverwritten, skipped + dupSkipped, errors, summary);
+    toast(`✦ Import Complete`, summary || `${newAdded} visit${newAdded!==1?'s':''} added.`);
+
   } catch(e) {
     console.error('Bulk import error:', e);
     toast('Import Failed', e?.message || String(e), true);
     if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
+    const progWrap = document.getElementById('importProgressWrap');
+    if (progWrap) progWrap.innerHTML = `<div class="alert alert-warn">❌ Import error: ${xe(e?.message||String(e))}</div>`;
   }
 }
 
 /* ─────────────────────────────────────────────────────────
-   TEMPLATE DOWNLOAD
+   EXPORT ERRORS — Download invalid rows with error notes
 ───────────────────────────────────────────────────────── */
+function exportUploadErrors() {
+  const errRows = _uploadRows.filter(r => !r._valid);
+  if (!errRows.length) { toast('No Errors', 'All rows are valid.'); return; }
+  const headerCols = [...UPLOAD_COLS, '_errors'];
+  const lines = [headerCols.join(',')];
+  errRows.forEach(r => {
+    const vals = UPLOAD_COLS.map(col => {
+      const v = r[col] !== undefined ? r[col] : '';
+      return `"${String(v).replace(/"/g,'""')}"`;
+    });
+    vals.push(`"${r._errors.join('; ').replace(/"/g,'""')}"`);
+    lines.push(vals.join(','));
+  });
+  const csv = lines.join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'plantvisit_import_errors.csv';
+  a.click();
+  toast('⬇ Errors Exported', `${errRows.length} invalid row${errRows.length!==1?'s':''} downloaded with error notes.`);
+}
+
+/* ─────────────────────────────────────────────────────────
+   ROLLBACK — Delete all records added in the last import
+───────────────────────────────────────────────────────── */
+async function rollbackLastImport() {
+  if (!_lastImportBatch || !_lastImportBatch.ids.length) {
+    toast('Nothing to Undo', 'No recent import found.', true); return;
+  }
+  const { ids, count, time } = _lastImportBatch;
+  if (!confirm(`↩ Undo the import from ${time}?\n\nThis will permanently delete ${count} record${count!==1?'s':''} that were added/overwritten in that batch.\n\nThis action cannot be undone.`)) return;
+
+  try {
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const chunk = ids.slice(i, i + BATCH_SIZE);
+      const batch = db.batch();
+      chunk.forEach(id => batch.delete(db.collection(VISITS_COL).doc(id)));
+      await batch.commit();
+    }
+    // Remove from in-memory store
+    const idSet = new Set(ids);
+    _visitsData = _visitsData.filter(v => !idSet.has(v.id));
+    updateBadges();
+    _lastImportBatch = null;
+    _importedIds = [];
+    toast('↩ Import Rolled Back', `${count} record${count!==1?'s':''} removed.`);
+    renderBulkUpload(document.getElementById('mainContent'));
+  } catch(e) {
+    console.error('Rollback error:', e);
+    toast('Rollback Failed', e?.message || String(e), true);
+  }
+}
+
+
 function downloadUploadTemplate() {
   const headers = UPLOAD_COLS.join(',');
   const example = [
