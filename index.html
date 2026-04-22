@@ -4724,8 +4724,9 @@ function parseUploadCSV(text) {
     const resolvedStatus = statusMatch || (rawStatus ? rawStatus : 'Scheduled');
 
     // ── Auto-resolve criticality (case-insensitive, default Medium) ──
-    const rawCrit   = get('criticality') || 'Medium';
-    const critMatch = CRITS.find(c => c.toLowerCase() === rawCrit.toLowerCase());
+    const rawCritInput = get('criticality');
+    const rawCrit      = rawCritInput || 'Medium';
+    const critMatch    = CRITS.find(c => c.toLowerCase() === rawCrit.toLowerCase());
     const resolvedCrit = critMatch || rawCrit;
 
     // ── Auto-resolve category (case-insensitive, fallback to first) ──
@@ -4782,9 +4783,9 @@ function parseUploadCSV(text) {
       else errs.push(`plant "${row.plant}" not found — valid: ${PLANTS.join(', ')}`);
     }
 
-    // 4. Criticality must be valid
-    if (!critMatch)
-      errs.push(`criticality must be one of: ${CRITS.join(', ')} (got "${rawCrit}")`);
+    // 4. Criticality must be valid (only error if user explicitly provided a bad value)
+    if (!critMatch && rawCritInput)
+      errs.push(`criticality must be one of: ${CRITS.join(', ')} (got "${rawCritInput}")`);
 
     // 5. Status must be valid
     if (!statusMatch && rawStatus)
@@ -5171,10 +5172,16 @@ async function executeUploadImport() {
 ───────────────────────────────────────────────────────── */
 function downloadUploadTemplate() {
   const headers = UPLOAD_COLS.join(',');
+  // Use today-relative dates so the example row never clashes with existing records
+  const _today = new Date();
+  const _fmt = d => d.toISOString().slice(0,10);
+  const _confirmEx = _fmt(new Date(_today.getTime() - 3*86400000));   // 3 days ago
+  const _visitEx   = _fmt(new Date(_today.getTime() + 7*86400000));   // 7 days ahead
+  const _visitEndEx= _fmt(new Date(_today.getTime() + 8*86400000));   // 8 days ahead
   const example = [
-    '2024-04-10',            // confirm_date
-    '2024-04-18',            // visit_date
-    '2024-04-19',            // visit_date_end  (leave blank for single-day)
+    _confirmEx,              // confirm_date
+    _visitEx,                // visit_date
+    _visitEndEx,             // visit_date_end  (leave blank for single-day)
     PLANTS[0],               // plant  — matches your live plant list
     'Tata Steel Ltd',        // company
     'Mr. Suresh Patel',      // rep
