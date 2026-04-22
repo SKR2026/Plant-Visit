@@ -4708,6 +4708,7 @@ function parseUploadCSV(text) {
       _idx:         _uploadRows.length,
       _valid:       true,
       _errors:      [],
+      _warnings:    [],
       confirm_date: get('confirm_date'),
       visit_date:     get('visit_date'),
       visit_date_end: get('visit_date_end') || '',
@@ -4767,16 +4768,14 @@ function parseUploadCSV(text) {
       else errs.push(`status must be one of: ${STATUSES.join(', ')} (got "${row.status}")`);
     }
 
-    // Category — warn but don't block
+    // Category — warn but don't block import
     if (row.category && !CATEGORIES.includes(row.category)) {
-      // Auto-assign to first category and add info note (not an error)
-      errs.push(`category "${row.category}" unknown — will use "${CATEGORIES[0]}"`);
+      // Auto-correct to first valid category; record as warning, NOT a blocking error
+      row._warnings.push(`category "${row.category}" unknown — will use "${CATEGORIES[0]}"`);
       row.category = CATEGORIES[0];
     }
 
     row._valid = errs.length === 0;
-    // Rows with only "category unknown" warning are still importable after correction
-    // We treat any error as blocking (simpler, safer)
     _uploadRows.push(row);
   }
 
@@ -4845,7 +4844,8 @@ function refreshUploadPreview() {
       tr.className = r._valid ? 'row-ok' : 'row-err';
       const statusHtml = r._valid ? '<span class="row-status-ok">✓ Ready</span>' : '<span class="row-status-err">✗ Error</span>';
       const errHtml = r._errors.length ? `<div style="margin-top:3px"><div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div></div>` : '';
-      tr.cells[1].innerHTML = statusHtml + errHtml;
+      const warnHtml = (r._warnings && r._warnings.length) ? `<div style="margin-top:3px;font-size:10px;color:var(--orange)" title="${xe(r._warnings.join('; '))}">⚠ ${r._warnings[0]}</div>` : '';
+      tr.cells[1].innerHTML = statusHtml + errHtml + warnHtml;
       tr.cells[tr.cells.length-1].innerHTML = `<button onclick="toggleUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">Skip</button>`;
       if (r._valid && !isSkipped) okCount++;
     }
@@ -5112,13 +5112,13 @@ function downloadUploadTemplate() {
     '2024-04-10',           // confirm_date
     '2024-04-18',           // visit_date
     '2024-04-19',           // visit_date_end  (leave blank for single-day)
-    PLANTS[0],              // plant
+    PLANTS[0],              // plant  — uses your live plant list
     'Tata Steel Ltd',       // company
     'Mr. Suresh Patel',     // rep
-    CATEGORIES[0],          // category
-    'High',                 // criticality
+    CATEGORIES[0],          // category — uses your live category list
+    CRITS[2],               // criticality = Medium
     'New Order Discussion', // focus
-    'Scheduled',            // status
+    STATUSES[0],            // status — uses live STATUSES list (e.g. Scheduled)
     'Rajesh Kumar',         // coordinator
     'Engineering Head, CFO',// attendees
     'Y',                    // stay
@@ -5131,7 +5131,7 @@ function downloadUploadTemplate() {
   a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = 'plantvisit_bulk_upload_template.csv';
   a.click();
-  toast('Template Downloaded', 'Fill in the CSV and upload it here.');
+  toast('Template Downloaded', `Fill in the CSV and upload it here. Valid statuses: ${STATUSES.join(', ')}`);
 }
 
 </script>
