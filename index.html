@@ -1187,6 +1187,19 @@ function initFirestoreListeners() {
         if (!_usersData[id]) _usersData[id] = u;
       });
 
+      // ★ LIVE-SYNC FIX: If app is already running and the user data changed from
+      //   another device (e.g. admin created/edited/deleted a user), refresh the
+      //   active tab so the UI reflects the update immediately — no page reload needed.
+      if (_appReady && document.getElementById('mainContent')?.style.display === 'block') {
+        updateBadges();
+        const _activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
+        // Only re-render settings/user-management tab if it's active — avoids disrupting
+        // the user mid-form on other tabs.
+        if (_activeTab === 'settings') {
+          showTab('settings');
+        }
+      }
+
     } else {
       // No docs yet — attempt one-time migration from old single-doc format
       USERS_DOC.get().then(doc => {
