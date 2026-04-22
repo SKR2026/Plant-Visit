@@ -4551,6 +4551,9 @@ function _parseCSVLine(line) {
   out.push(field.trim());
   return out;
 }
+// Alias for user upload system
+function parseCSVLine(line) { return _parseCSVLine(line); }
+
 
 /* ══════════════════════════════════════════════════════════
    PARSE & VALIDATE
