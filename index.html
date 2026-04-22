@@ -952,6 +952,7 @@ const STATUSES   = ['Scheduled','Confirmed','Completed','Cancelled'];
 const DEFAULT_USERS = {
   admin:     { name:'Admin User',    initials:'AU', role:'Administrator',  access:'admin',      plant:null,      password:'admin123',   email:'admin@company.com' },
   developer: { name:'Developer',     initials:'DV', role:'Administrator',  access:'admin',      plant:null,      password:'dev@2025',   email:'developer@internal.com', hidden:true },
+  sushil:    { name:'Sushil',        initials:'SU', role:'Administrator',  access:'admin',      plant:null,      password:'poly@123',   email:'sushil@company.com' },
 };
 
 const SEED_DATA = [
@@ -1179,15 +1180,13 @@ function bootApp() {
     document.body.classList.add('light');
     document.getElementById('themeBtn').textContent = '☀️';
   }
-  // Hide loader
+  // Force-hide loader
   const pl = document.getElementById('pageLoader');
   if (pl) { pl.style.display = 'none'; pl.classList.add('hidden'); }
-  // Always show login screen (unless a session is already active)
-  const ls = document.getElementById('loginScreen');
-  if (ls && !currentUser) {
-    ls.style.display = 'flex';
-    ls.style.opacity  = '1';
-    ls.classList.remove('hidden');
+  // Force-show login screen (only if no active session)
+  if (!currentUser) {
+    const ls = document.getElementById('loginScreen');
+    if (ls) { ls.style.display = 'flex'; ls.style.opacity = '1'; ls.classList.remove('hidden'); }
   }
 }
 
@@ -4227,16 +4226,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const _dlParams = new URLSearchParams(window.location.search);
   if (_dlParams.get('visit') || _dlParams.get('guest')) return;
 
-  // Hard failsafe — if Firebase never responds within 4s, boot offline so login always appears
+  // Hard failsafe — boot offline if Firebase doesn't respond within 4s
   const _bootFailsafe = setTimeout(() => {
     if (!_appReady) {
-      console.warn('PlantVisit: Firebase timeout — booting in offline mode');
+      console.warn('PlantVisit: Firebase timeout — booting offline');
       _loadLocalUsers();
       bootApp();
     }
   }, 4000);
 
-  // Sign in anonymously to satisfy Firestore auth rules, then start listeners
+  // Sign in anonymously then start Firestore listeners
   try {
     firebase.auth().signInAnonymously()
       .then(() => { clearTimeout(_bootFailsafe); initFirestoreListeners(); })
