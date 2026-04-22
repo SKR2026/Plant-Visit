@@ -1098,21 +1098,16 @@ function _persistUsers() {
 
 function saveUsers() { _persistUsers(); }
 
-// Load custom users + deletion list from localStorage into _usersData on boot
+// Fast-boot pre-fill from same-device localStorage cache only.
+// Firestore snapshots are the source of truth and will override within ~1s.
+// Does NOT set _deletedDefaultUsers — done exclusively by appUsersMeta onSnapshot.
 function _loadLocalUsers() {
   try {
-    const custom  = JSON.parse(localStorage.getItem('pv_users_custom') || '{}');
-    // Same-device cache: merge locally-stored deletions into _deletedDefaultUsers
-    // On a fresh device localStorage is empty so this is a no-op; Firestore wins.
-    const localDeleted = JSON.parse(localStorage.getItem('pv_deleted_defaults') || '[]');
-    localDeleted.forEach(id => { if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id); });
-    // Start from DEFAULT_USERS minus any explicitly deleted ones
-    const base = {};
-    Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
-      if (!_deletedDefaultUsers.includes(id)) base[id] = u;
-    });
-    _usersData = { ...base, ...custom };
-  } catch(e) {}
+    const custom = JSON.parse(localStorage.getItem('pv_users_custom') || '{}');
+    _usersData = { ...DEFAULT_USERS, ...custom };
+  } catch(e) {
+    _usersData = { ...DEFAULT_USERS };
+  }
 }
 function saveSettings() {
   SETTINGS_DOC.set(_settingsData).catch(e => console.error(e));
@@ -1143,70 +1138,102 @@ function initFirestoreListeners() {
     if (_appReady) updateBadges();
   }, e => console.error(e));
 
-  // ── Users listener: collection-per-user (new format) ──────────────────
-  // Also performs a one-time migration from the old single-doc format.
+  // ── Shared helper: rebuild _usersData from Firestore snapshots ──────────
+  // Called whenever EITHER appUsers OR appUsersMeta snapshot fires.
+  // Both snapshots update their respective in-memory caches first, then call this.
+  // This eliminates race conditions between the two listeners.
+  let _fsUsersCache = null;      // latest appUsers snapshot data (null = not yet arrived)
+  let _fsMetaReady  = false;     // has appUsersMeta fired at least once?
+
+  function _rebuildUsersData() {
+    // Wait until both snapshots have fired at least once before rebuilding.
+    // This prevents appUsers from building with empty _deletedDefaultUsers
+    // because appUsersMeta hasn't arrived yet.
+    if (_fsUsersCache === null || !_fsMetaReady) return;
+
+    // Build base: DEFAULT_USERS minus Firestore-confirmed deletions
+    const base = {};
+    Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
+      if (!_deletedDefaultUsers.includes(id)) base[id] = u;
+    });
+
+    // Merge: Firestore user docs win over DEFAULT_USERS (passwords, names etc.)
+    const merged = { ...base, ..._fsUsersCache };
+
+    // Remove any explicitly deleted default users
+    _deletedDefaultUsers.forEach(id => { delete merged[id]; });
+
+    // Keep role/access/hidden consistent for default accounts (passwords can change via Firestore)
+    Object.keys(DEFAULT_USERS).forEach(key => {
+      if (merged[key] && !_deletedDefaultUsers.includes(key)) {
+        const fsPass = _fsUsersCache[key]?.password;
+        merged[key] = {
+          ...merged[key],
+          access: DEFAULT_USERS[key].access,
+          hidden: DEFAULT_USERS[key].hidden,
+          password: fsPass || DEFAULT_USERS[key].password,
+        };
+      }
+    });
+
+    // ★ KEY FIX: Do NOT re-inject localStorage pendingCustom here.
+    // localStorage is device-local. If device A deleted a user, device B's
+    // localStorage still has that user and would put it back. Firestore is
+    // the ONLY source of truth for user state across devices.
+    // (localStorage is only written, never re-read to populate _usersData after boot)
+
+    _usersData = merged;
+
+    // Update localStorage cache for same-device fast boot only
+    const customOnly = {};
+    Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
+    localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
+    localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+
+    // Re-render settings tab if it's active so UI stays in sync on all devices
+    if (_appReady && document.getElementById('mainContent')?.style.display === 'block') {
+      updateBadges();
+      const _activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
+      if (_activeTab === 'settings') showTab('settings');
+    }
+  }
+
+  // ── appUsersMeta listener: deletedDefaults (MUST register before appUsers) ──
+  // By listening to this first, _deletedDefaultUsers will often be populated
+  // before appUsers snapshot fires, avoiding the rebuild race.
+  db.collection('config').doc('appUsersMeta').onSnapshot(doc => {
+    const fsDeleted = doc.exists ? (doc.data().deletedDefaults || []) : [];
+    _deletedDefaultUsers = [...fsDeleted];  // Firestore is the authoritative list
+    localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+    _fsMetaReady = true;
+    _rebuildUsersData();
+  }, e => {
+    // On error, still mark meta as ready so appUsers snapshot can proceed
+    console.warn('appUsersMeta listener error:', e);
+    _fsMetaReady = true;
+    _rebuildUsersData();
+  });
+
+  // ── appUsers listener: one doc per user ──────────────────────────────────
   db.collection(USERS_COL).onSnapshot(snapshot => {
-    console.log('[PlantVisit] 👥 appUsers onSnapshot fired. Docs count:', snapshot.docs.length, '| Docs:', snapshot.docs.map(d=>d.id));
+    console.log('[PlantVisit] 👥 appUsers onSnapshot fired. Docs count:', snapshot.docs.length);
     if (snapshot.docs.length > 0) {
-      // ★ New format: each doc is one user
-      const firestoreUsers = {};
+      // Cache the raw Firestore user map
+      _fsUsersCache = {};
       snapshot.docs.forEach(d => {
         const data = d.data();
         const uid  = data._id || d.id;
-        const { _id, ...rest } = data;   // strip internal _id field
-        firestoreUsers[uid] = rest;
+        const { _id, ...rest } = data;
+        _fsUsersCache[uid] = rest;
       });
-
-      // Build base: DEFAULT_USERS minus deleted ones
-      const base = {};
-      Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
-        if (!_deletedDefaultUsers.includes(id)) base[id] = u;
-      });
-      const merged = { ...base, ...firestoreUsers };
-      _deletedDefaultUsers.forEach(id => { delete merged[id]; });
-
-      // Keep passwords/access consistent for default accounts
-      Object.keys(DEFAULT_USERS).forEach(key => {
-        if (merged[key] && !_deletedDefaultUsers.includes(key)) {
-          const fsPass = firestoreUsers[key]?.password;
-          merged[key] = {
-            ...merged[key],
-            access: DEFAULT_USERS[key].access,
-            hidden: DEFAULT_USERS[key].hidden,
-            password: fsPass || DEFAULT_USERS[key].password,
-          };
-        }
-      });
-      _usersData = merged;
-
-      // ★ FIX: Merge Firestore users with any locally-pending custom users so that
-      //   a new user saved moments ago (not yet confirmed by Firestore) isn't wiped.
-      let pendingCustom = {};
-      try { pendingCustom = JSON.parse(localStorage.getItem('pv_users_custom') || '{}'); } catch(e) {}
-      const customOnly = {};
-      Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
-      const mergedCustom = { ...pendingCustom, ...customOnly };
-      localStorage.setItem('pv_users_custom', JSON.stringify(mergedCustom));
-      // Also merge pending custom users that Firestore hasn't confirmed yet into live state
-      Object.entries(pendingCustom).forEach(([id, u]) => {
-        if (!_usersData[id]) _usersData[id] = u;
-      });
-
-      // ★ LIVE-SYNC FIX: If app is already running and the user data changed from
-      //   another device (e.g. admin created/edited/deleted a user), refresh the
-      //   active tab so the UI reflects the update immediately — no page reload needed.
-      if (_appReady && document.getElementById('mainContent')?.style.display === 'block') {
-        updateBadges();
-        const _activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
-        // Only re-render settings/user-management tab if it's active — avoids disrupting
-        // the user mid-form on other tabs.
-        if (_activeTab === 'settings') {
-          showTab('settings');
-        }
-      }
+      _rebuildUsersData();
 
     } else {
-      // No docs yet — attempt one-time migration from old single-doc format
+      // No docs yet — mark cache as empty so _rebuildUsersData can run
+      _fsUsersCache = {};
+      _rebuildUsersData();
+
+      // Attempt one-time migration from old single-doc format
       USERS_DOC.get().then(doc => {
         if (doc.exists && doc.data().users) {
           console.log('[PlantVisit] Migrating users from legacy single-doc to per-doc collection…');
@@ -1215,10 +1242,7 @@ function initFirestoreListeners() {
           legacyDeleted.forEach(id => {
             if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id);
           });
-          // Sync to localStorage cache too
           localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
-
-          // Write each legacy user into the new collection
           const migBatch = db.batch();
           Object.entries(legacyUsers).forEach(([id, u]) => {
             migBatch.set(db.collection(USERS_COL).doc(id), { ...u, _id: id });
@@ -1234,39 +1258,6 @@ function initFirestoreListeners() {
       }).catch(e => console.warn('Legacy user doc read error:', e));
     }
   }, e => console.error('Users collection listener error:', e));
-
-  // Also sync the deletedDefaults meta doc — THIS is the cross-device source of truth
-  db.collection('config').doc('appUsersMeta').onSnapshot(doc => {
-    if (doc.exists) {
-      const fsDeleted = doc.data().deletedDefaults || [];
-      let changed = false;
-      fsDeleted.forEach(id => {
-        if (!_deletedDefaultUsers.includes(id)) {
-          _deletedDefaultUsers.push(id);
-          changed = true;
-        }
-      });
-      // ★ FIX: Also remove any ids that were un-deleted (not in fsDeleted anymore)
-      const prevLen = _deletedDefaultUsers.length;
-      _deletedDefaultUsers = _deletedDefaultUsers.filter(id => fsDeleted.includes(id));
-      if (_deletedDefaultUsers.length !== prevLen) changed = true;
-
-      localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
-
-      // ★ FIX: Rebuild _usersData so deleted default users disappear on this device too
-      if (changed) {
-        const base = {};
-        Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
-          if (!_deletedDefaultUsers.includes(id)) base[id] = u;
-        });
-        // Preserve all custom (non-default) users
-        const customOnly = {};
-        Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
-        _usersData = { ...base, ...customOnly };
-        _deletedDefaultUsers.forEach(id => { delete _usersData[id]; });
-      }
-    }
-  }, e => console.warn('appUsersMeta listener error:', e));
 
   SETTINGS_DOC.onSnapshot(doc => {
     if (doc.exists) {
