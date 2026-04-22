@@ -1021,9 +1021,12 @@ let _pendingVisitId = null; // for direct-link navigation
     // Then boot Firestore so data arrives and populates the view
     try {
       firebase.auth().signInAnonymously()
-        .then(() => initFirestoreListeners())
+        .then((userCred) => {
+          console.log('[PlantVisit] ✅ Anonymous auth OK (direct link). UID:', userCred?.user?.uid);
+          initFirestoreListeners();
+        })
         .catch(err => {
-          console.warn('Firebase anonymous auth failed (direct link):', err);
+          console.error('[PlantVisit] ❌ Anonymous auth FAILED (direct link):', err.code, err.message);
           try { initFirestoreListeners(); } catch(e2) {}
         });
     } catch(e) {
@@ -1075,7 +1078,19 @@ function _persistUsers() {
     db.collection('config').doc('appUsersMeta'),
     { deletedDefaults: _deletedDefaultUsers }
   );
-  batch.commit().catch(e => console.error('saveUsers Firestore error:', e));
+  batch.commit()
+    .then(() => {
+      console.log('[PlantVisit] ✅ Users batch committed to Firestore successfully. Count:', Object.keys(_usersData).length);
+    })
+    .catch(e => {
+      console.error('[PlantVisit] ❌ saveUsers Firestore BATCH FAILED:', e.code, e.message);
+      // Show visible toast so admin knows sync failed
+      try {
+        toast('⚠ Firestore Sync Failed',
+          'User saved locally only. Other devices won\'t see this user.\nError: ' + (e.code || e.message),
+          true);
+      } catch(_){}
+    });
 }
 
 function saveUsers() { _persistUsers(); }
@@ -1126,6 +1141,7 @@ function initFirestoreListeners() {
   // ── Users listener: collection-per-user (new format) ──────────────────
   // Also performs a one-time migration from the old single-doc format.
   db.collection(USERS_COL).onSnapshot(snapshot => {
+    console.log('[PlantVisit] 👥 appUsers onSnapshot fired. Docs count:', snapshot.docs.length, '| Docs:', snapshot.docs.map(d=>d.id));
     if (snapshot.docs.length > 0) {
       // ★ New format: each doc is one user
       const firestoreUsers = {};
@@ -4263,9 +4279,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Sign in anonymously to satisfy Firestore auth rules, then start listeners
   try {
     firebase.auth().signInAnonymously()
-      .then(() => initFirestoreListeners())
+      .then((userCred) => {
+        console.log('[PlantVisit] ✅ Anonymous auth OK. UID:', userCred?.user?.uid);
+        initFirestoreListeners();
+      })
       .catch(err => {
-        console.warn('Firebase anonymous auth failed:', err);
+        console.error('[PlantVisit] ❌ Anonymous auth FAILED:', err.code, err.message);
         try { initFirestoreListeners(); } catch(e2) { console.warn('Firestore listener error:', e2); }
       });
   } catch(e) {
