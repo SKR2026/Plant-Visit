@@ -1059,40 +1059,59 @@ function saveMail(mails) {
 let _deletedDefaultUsers = [];
 
 function _persistUsers() {
-  // ── localStorage fallback (offline / instant) ──────────────────────────
+  // KEY DESIGN: Only CUSTOM (non-default) users are stored in Firestore.
+  // DEFAULT_USERS are hardcoded in the app on every device, so writing them
+  // to Firestore causes the core bug: a "deleted" default user gets re-created
+  // on the next saveUsers() call because _usersData still has DEFAULT_USERS.
+  //
+  // We store three things in Firestore:
+  //   appUsers/<id>              — custom users only
+  //   config/appUsersMeta        — list of deleted default user IDs
+  //   config/appDefaultOverrides — password changes for default accounts
+
   const customOnly = {};
+  const defaultOverrides = {};
+
   Object.entries(_usersData).forEach(([id, u]) => {
-    if (!DEFAULT_USERS[id]) customOnly[id] = u;
+    if (DEFAULT_USERS[id]) {
+      // Only persist if password was changed from hardcoded default
+      if (u.password && u.password !== DEFAULT_USERS[id].password) {
+        defaultOverrides[id] = { password: u.password };
+      }
+    } else {
+      customOnly[id] = u;
+    }
   });
-  // ★ FIX: Save to localStorage FIRST so new users survive a reload even if
-  //   Firestore hasn't confirmed the write yet (prevents onSnapshot race condition).
+
+  // Update same-device localStorage cache
   localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
   localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
 
-  // ── Firestore: one document per user (avoids 1 MB document limit) ──────
-  // Each user is stored in appUsers/<userId>  instead of one giant doc.
-  // This is safe for any number of users and any size of user record.
   const batch = db.batch();
-  Object.entries(_usersData).forEach(([id, u]) => {
+
+  // Write each custom user as its own Firestore doc
+  Object.entries(customOnly).forEach(([id, u]) => {
     batch.set(db.collection(USERS_COL).doc(id), { ...u, _id: id });
   });
-  // Record which default users were explicitly deleted
-  batch.set(
-    db.collection('config').doc('appUsersMeta'),
-    { deletedDefaults: _deletedDefaultUsers }
-  );
+
+  // Write deleted-defaults list and password overrides to config
+  batch.set(db.collection('config').doc('appUsersMeta'),
+    { deletedDefaults: _deletedDefaultUsers });
+  batch.set(db.collection('config').doc('appDefaultOverrides'),
+    { overrides: defaultOverrides });
+
   batch.commit()
     .then(() => {
-      console.log('[PlantVisit] ✅ Users batch committed to Firestore successfully. Count:', Object.keys(_usersData).length);
+      console.log('[PlantVisit] ✅ Users persisted. Custom:', Object.keys(customOnly).length,
+        '| Deleted defaults:', _deletedDefaultUsers);
     })
     .catch(e => {
-      console.error('[PlantVisit] ❌ saveUsers Firestore BATCH FAILED:', e.code, e.message);
-      // Show visible toast so admin knows sync failed
+      console.error('[PlantVisit] ❌ saveUsers FAILED:', e.code, e.message);
       try {
         toast('⚠ Firestore Sync Failed',
-          'User saved locally only. Other devices won\'t see this user.\nError: ' + (e.code || e.message),
+          'User saved locally only. Other devices won\'t see this change.\nError: ' + (e.code || e.message),
           true);
-      } catch(_){}
+      } catch(_) {}
     });
 }
 
@@ -1142,14 +1161,16 @@ function initFirestoreListeners() {
   // Called whenever EITHER appUsers OR appUsersMeta snapshot fires.
   // Both snapshots update their respective in-memory caches first, then call this.
   // This eliminates race conditions between the two listeners.
-  let _fsUsersCache = null;      // latest appUsers snapshot data (null = not yet arrived)
-  let _fsMetaReady  = false;     // has appUsersMeta fired at least once?
+  let _fsUsersCache    = null;   // latest appUsers snapshot data (null = not yet arrived)
+  let _fsMetaReady     = false;  // has appUsersMeta fired at least once?
+  let _fsOverrides     = {};     // password overrides for default users from appDefaultOverrides
+  let _fsOverridesReady = false; // has appDefaultOverrides fired at least once?
 
   function _rebuildUsersData() {
     // Wait until both snapshots have fired at least once before rebuilding.
     // This prevents appUsers from building with empty _deletedDefaultUsers
     // because appUsersMeta hasn't arrived yet.
-    if (_fsUsersCache === null || !_fsMetaReady) return;
+    if (_fsUsersCache === null || !_fsMetaReady || !_fsOverridesReady) return;
 
     // Build base: DEFAULT_USERS minus Firestore-confirmed deletions
     const base = {};
@@ -1166,12 +1187,12 @@ function initFirestoreListeners() {
     // Keep role/access/hidden consistent for default accounts (passwords can change via Firestore)
     Object.keys(DEFAULT_USERS).forEach(key => {
       if (merged[key] && !_deletedDefaultUsers.includes(key)) {
-        const fsPass = _fsUsersCache[key]?.password;
+        // Apply only password overrides from Firestore — not full user docs
+        // (default users are never written to appUsers collection anymore)
+        const override = _fsOverrides[key];
         merged[key] = {
-          ...merged[key],
-          access: DEFAULT_USERS[key].access,
-          hidden: DEFAULT_USERS[key].hidden,
-          password: fsPass || DEFAULT_USERS[key].password,
+          ...DEFAULT_USERS[key],
+          password: override?.password || DEFAULT_USERS[key].password,
         };
       }
     });
@@ -1211,6 +1232,17 @@ function initFirestoreListeners() {
     // On error, still mark meta as ready so appUsers snapshot can proceed
     console.warn('appUsersMeta listener error:', e);
     _fsMetaReady = true;
+    _rebuildUsersData();
+  });
+
+  // ── appDefaultOverrides listener: password changes for default accounts ────
+  db.collection('config').doc('appDefaultOverrides').onSnapshot(doc => {
+    _fsOverrides = doc.exists ? (doc.data().overrides || {}) : {};
+    _fsOverridesReady = true;
+    _rebuildUsersData();
+  }, e => {
+    console.warn('appDefaultOverrides listener error:', e);
+    _fsOverridesReady = true; // don't block rebuild on error
     _rebuildUsersData();
   });
 
@@ -3380,15 +3412,30 @@ function deleteUser(id, name) {
   if (!confirm(`Delete user "${name}" (${id})?
 
 This action cannot be undone.`)) return;
-  // If this is a default user, record the deletion so onSnapshot won't restore it
+
+  // Remove from in-memory state
+  delete _usersData[id];
+
   if (DEFAULT_USERS[id]) {
+    // Default user: record deletion in Firestore meta doc (NOT via saveUsers which writes all users)
     if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id);
     localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+    // Write only the meta doc — do NOT call saveUsers() which would re-create the deleted user
+    db.collection('config').doc('appUsersMeta')
+      .set({ deletedDefaults: _deletedDefaultUsers })
+      .catch(e => console.error('deleteUser meta write error:', e));
+  } else {
+    // Custom user: delete their Firestore doc directly
+    db.collection(USERS_COL).doc(id).delete()
+      .catch(e => console.error('deleteUser Firestore error:', e));
+    // Update localStorage cache to remove this user
+    try {
+      const custom = JSON.parse(localStorage.getItem('pv_users_custom') || '{}');
+      delete custom[id];
+      localStorage.setItem('pv_users_custom', JSON.stringify(custom));
+    } catch(e) {}
   }
-  delete _usersData[id];
-  // ★ Remove from Firestore collection (new per-doc format)
-  db.collection(USERS_COL).doc(id).delete().catch(e => console.error('deleteUser Firestore error:', e));
-  saveUsers();
+
   toast('✓ Deleted', name + ' removed successfully.');
   const el = document.getElementById('settingsContent');
   if (el) renderUserManagement(el);
