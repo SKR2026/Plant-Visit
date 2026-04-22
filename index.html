@@ -1329,6 +1329,34 @@ function refreshActiveTab() {
   }
 }
 
+/**
+ * _renderAfterLogin(targetTab)
+ * Called from activateSession() to render the initial tab after login.
+ * If _visitsData is already loaded, renders immediately.
+ * If not (slow connection), shows a spinner and polls until data arrives.
+ */
+function _renderAfterLogin(targetTab) {
+  if (_visitsData && _visitsData.length > 0) {
+    showTab(targetTab);
+    return;
+  }
+  // Data not yet loaded — mark the correct tab active, show a brief spinner
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const tb = document.getElementById('tab-' + targetTab);
+  if (tb) tb.classList.add('active');
+  const mc = document.getElementById('mainContent');
+  if (mc) mc.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px;color:var(--slate)"><div style="font-size:28px;opacity:.4">⏳</div><div style="font-size:13px;letter-spacing:.3px">Loading data…</div><div class="loader-bar" style="width:100px"><div class="loader-fill"></div></div></div>';
+  let attempts = 0;
+  const poll = setInterval(() => {
+    attempts++;
+    if ((_visitsData && _visitsData.length > 0) || attempts > 30) {
+      clearInterval(poll);
+      updateBadges();
+      showTab(targetTab);
+    }
+  }, 200);
+}
+
 /* ══════════════════════════════════════════════════════════
    LOGIN / LOGOUT / AUTH
 ══════════════════════════════════════════════════════════ */
@@ -1375,26 +1403,7 @@ function activateSession(user, id, visitId) {
 
   // Navigate
   _pendingVisitId = null;
-  const _targetTab = visitId ? 'records' : 'dashboard';
-
-  // If Firestore data hasn't loaded yet, show a loading placeholder and let
-  // refreshActiveTab() (called from the first onSnapshot) do the real render.
-  // This prevents the dashboard from drawing with empty _visitsData on login.
-  if (!_appReady || !_visitsData || _visitsData.length === 0) {
-    // Mark which tab should be active so refreshActiveTab() targets it correctly
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    const _tb = document.getElementById('tab-' + _targetTab);
-    if (_tb) _tb.classList.add('active');
-    // Show a subtle loading state in the content area
-    const _mc = document.getElementById('mainContent');
-    if (_mc) _mc.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px;color:var(--slate)">
-      <div style="font-size:28px;opacity:.4">⏳</div>
-      <div style="font-size:13px;letter-spacing:.3px">Loading dashboard data…</div>
-      <div class="loader-bar" style="width:100px"><div class="loader-fill"></div></div>
-    </div>`;
-  } else {
-    showTab(_targetTab);
-  }
+  _renderAfterLogin(visitId ? 'records' : 'dashboard');
 }
 
 /**
