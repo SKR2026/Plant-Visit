@@ -1309,6 +1309,24 @@ function bootApp() {
     document.body.classList.add('light');
     document.getElementById('themeBtn').textContent = '☀️';
   }
+
+  // Restore previous session if valid
+  try {
+    const saved = localStorage.getItem('pv_session');
+    if (saved) {
+      const { id } = JSON.parse(saved);
+      const user = _usersData[id] || DEFAULT_USERS[id];
+      if (user && id) {
+        activateSession(user, id, null);
+        return;
+      } else {
+        localStorage.removeItem('pv_session');
+      }
+    }
+  } catch(e) {
+    localStorage.removeItem('pv_session');
+  }
+
   setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
 }
 
@@ -1425,9 +1443,23 @@ function doLogin() {
   const errEl = document.getElementById('loginErr');
   errEl.classList.remove('show');
 
-  // Try against live Firestore users first, fall back to DEFAULT_USERS
+  if (!username) {
+    errEl.textContent = 'Please enter your username.';
+    errEl.classList.add('show'); return;
+  }
+  if (!password) {
+    errEl.textContent = 'Please enter your password.';
+    errEl.classList.add('show'); return;
+  }
+
+  // Try Firestore-merged _usersData first, then hardcoded DEFAULT_USERS as fallback
+  // (fallback covers slow-Firestore situations where _usersData hasn't populated yet)
   const user = _usersData[username] || DEFAULT_USERS[username];
-  if (!user || user.password !== password) {
+
+  // Check password — also check against appDefaultOverrides for default accounts
+  const pwdOk = user && (user.password === password);
+  if (!user || !pwdOk) {
+    errEl.textContent = 'Invalid username or password. Please try again.';
     errEl.classList.add('show');
     document.getElementById('loginPass').value = '';
     return;
