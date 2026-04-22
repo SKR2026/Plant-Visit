@@ -950,12 +950,12 @@ const CRITS      = ['Critical','High','Medium','Low'];
 const STATUSES   = ['Scheduled','Confirmed','Completed','Cancelled'];
 
 const DEFAULT_USERS = {
-  admin:     { name:'Admin User',    initials:'AU', role:'Administrator',  access:'admin',      plant:null,      password:'admin123',   email:'admin@company.com' },
-  mgmt:      { name:'VP Operations', initials:'VO', role:'Top Management', access:'management', plant:null,      password:'mgmt123',    email:'vp@company.com' },
-  pune:      { name:'Rajesh Kumar',  initials:'RK', role:'Plant User',     access:'plant',      plant:'Pune',    password:'pune123',    email:'plant-pune@company.com' },
-  chennai:   { name:'Anita Sharma',  initials:'AS', role:'Plant User',     access:'plant',      plant:'Chennai', password:'chennai123', email:'plant-chennai@company.com' },
-  ahmedabad: { name:'Pradeep Mehta', initials:'PM', role:'Plant User',     access:'plant',      plant:'Ahmedabad',password:'ahm123',   email:'plant-ahmedabad@company.com' },
-  developer: { name:'Developer',     initials:'DV', role:'Administrator',  access:'admin',      plant:null,      password:'dev@2025',   email:'developer@internal.com', hidden:true },
+  admin:     { name:'Admin User',    initials:'AU', role:'Administrator',  access:'admin',      plant:null,      plants:null,               password:'admin123',   email:'admin@company.com' },
+  mgmt:      { name:'VP Operations', initials:'VO', role:'Top Management', access:'management', plant:null,      plants:null,               password:'mgmt123',    email:'vp@company.com' },
+  pune:      { name:'Rajesh Kumar',  initials:'RK', role:'Plant User',     access:'plant',      plant:'Pune',    plants:['Pune'],            password:'pune123',    email:'plant-pune@company.com' },
+  chennai:   { name:'Anita Sharma',  initials:'AS', role:'Plant User',     access:'plant',      plant:'Chennai', plants:['Chennai'],         password:'chennai123', email:'plant-chennai@company.com' },
+  ahmedabad: { name:'Pradeep Mehta', initials:'PM', role:'Plant User',     access:'plant',      plant:'Ahmedabad',plants:['Ahmedabad'],      password:'ahm123',   email:'plant-ahmedabad@company.com' },
+  developer: { name:'Developer',     initials:'DV', role:'Administrator',  access:'admin',      plant:null,      plants:null,               password:'dev@2025',   email:'developer@internal.com', hidden:true },
 };
 
 const SEED_DATA = [
@@ -1052,7 +1052,7 @@ function saveMail(mails) {
 let _deletedDefaultUsers = JSON.parse(localStorage.getItem('pv_deleted_defaults') || '[]');
 
 function _persistUsers() {
-  // Save full user map + deletion list to localStorage (instant, no network)
+  // Save custom users to localStorage (instant, no network) — for offline fallback
   const customOnly = {};
   Object.entries(_usersData).forEach(([id, u]) => {
     if (!DEFAULT_USERS[id]) customOnly[id] = u;   // only custom users
@@ -1060,7 +1060,8 @@ function _persistUsers() {
   localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
   localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
 
-  // Also push full map to Firestore
+  // Push FULL user map to Firestore (including all custom users with passwords)
+  // This ensures users survive page reload/app restart — Firestore is the primary store
   USERS_DOC.set({ users: _usersData, deletedDefaults: _deletedDefaultUsers })
     .catch(e => console.error('saveUsers Firestore error:', e));
 }
@@ -1123,17 +1124,30 @@ function initFirestoreListeners() {
       Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
         if (!_deletedDefaultUsers.includes(id)) base[id] = u;
       });
-      // Merge Firestore users on top — but only re-apply credentials for non-deleted defaults
+      // Merge Firestore users on top — Firestore is the source of truth for custom users
       const merged = { ...base, ...firestoreUsers };
       // Remove any user that was explicitly deleted
       _deletedDefaultUsers.forEach(id => { delete merged[id]; });
-      // Restore original passwords/access for remaining default accounts (prevent lockout)
+      // FIX: For default accounts, restore access/hidden but KEEP Firestore password if it was changed
+      // Only restore password if the Firestore entry doesn't have one set (prevents lockout recovery issues)
       Object.keys(DEFAULT_USERS).forEach(key => {
         if (merged[key] && !_deletedDefaultUsers.includes(key)) {
-          merged[key] = { ...merged[key], password: DEFAULT_USERS[key].password, access: DEFAULT_USERS[key].access, hidden: DEFAULT_USERS[key].hidden };
+          // Keep whatever password is in Firestore (could be admin-changed); restore access + hidden from defaults
+          const fsPass = firestoreUsers[key]?.password;
+          merged[key] = {
+            ...merged[key],
+            access: DEFAULT_USERS[key].access,
+            hidden: DEFAULT_USERS[key].hidden,
+            // Use Firestore password if explicitly saved there, else fall back to default
+            password: fsPass || DEFAULT_USERS[key].password,
+          };
         }
       });
       _usersData = merged;
+      // Keep localStorage in sync with Firestore truth
+      const customOnly = {};
+      Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
+      localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
     }
   }, e => console.error(e));
 
@@ -1385,10 +1399,23 @@ function updateBadges() {
   document.getElementById('recordsBadge').textContent = getVisible().length;
   document.getElementById('mailBadge').textContent    = loadMail().length;
 }
+/**
+ * getUserPlants(user)
+ * Returns an array of plants assigned to the given user.
+ * Supports both new `plants` (array) and legacy `plant` (string) fields.
+ */
+function getUserPlants(user) {
+  if (!user) return [];
+  if (Array.isArray(user.plants) && user.plants.length > 0) return user.plants;
+  if (user.plant) return [user.plant];
+  return [];
+}
+
 function getVisible() {
   const visits = loadVisits();
   if (!currentUser || currentUser.access !== 'plant') return visits;
-  return visits.filter(v => v.plant === currentUser.plant);
+  const userPlants = getUserPlants(currentUser);
+  return visits.filter(v => userPlants.includes(v.plant));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1431,8 +1458,11 @@ function renderDashboard(el) {
   const gc  = isDark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)';
 
   // Plant stats rows
-  const plantStatsHtml = currentUser.access !== 'plant' ? (() => {
-    const plantCards = PLANTS.map(plant => {
+  const userPlants = getUserPlants(currentUser);
+  const showPlantStats = currentUser.access !== 'plant' || userPlants.length > 1;
+  const plantStatsHtml = showPlantStats ? (() => {
+    const plantsToShow = currentUser.access !== 'plant' ? PLANTS : userPlants;
+    const plantCards = plantsToShow.map(plant => {
       const pv = visits.filter(v => v.plant === plant);
       const ptotal = pv.length;
       const pSched = pv.filter(v=>v.status==='Scheduled').length;
@@ -1476,14 +1506,14 @@ function renderDashboard(el) {
 
   <div class="section-header">
     <div class="section-title">Command Centre</div>
-    <div class="section-sub">${currentUser.access === 'plant' ? currentUser.plant + ' plant' : 'All plants'} · ${total} total records</div>
+    <div class="section-sub">${currentUser.access === 'plant' ? getUserPlants(currentUser).join(', ') + ' plant(s)' : 'All plants'} · ${total} total records</div>
   </div>
 
   <div class="metric-grid">
     <div class="metric metric-clickable" style="--metric-accent:#e8c547" onclick="navToRecords()" title="View all records">
       <div class="metric-label">Total Visits</div>
       <div class="metric-value">${total}</div>
-      <div class="metric-sub">${currentUser.access==='plant'?currentUser.plant:'All Plants'} <span class="metric-arrow">→</span></div>
+      <div class="metric-sub">${currentUser.access==='plant'?getUserPlants(currentUser).join(', '):'All Plants'} <span class="metric-arrow">→</span></div>
     </div>
     <div class="metric metric-clickable" style="--metric-accent:#4a90e2" onclick="navToRecords('','Scheduled')" title="View scheduled visits">
       <div class="metric-label">Upcoming</div>
@@ -3046,7 +3076,7 @@ function _umDraw(el) {
   const filt = all.filter(([id,u]) => {
     if (q && !((u.name||'')+' '+(u.email||'')+' '+id+' '+(u.plant||'')).toLowerCase().includes(q)) return false;
     if (_umRole  !== 'all' && u.access !== _umRole)  return false;
-    if (_umPlant !== 'all' && (u.plant||'all') !== _umPlant) return false;
+    if (_umPlant !== 'all' && !getUserPlants(u).includes(_umPlant)) return false;
     return true;
   });
   const pages = Math.max(1, Math.ceil(filt.length/_UM_PER));
@@ -3063,8 +3093,12 @@ function _umDraw(el) {
           <div style="font-size:11px;color:var(--slate)">${xe(u.email||'')}</div></div>
       </div></td>
       <td><code style="font-size:11px;background:var(--navy4);padding:2px 8px;border-radius:4px">${xe(id)}</code></td>
-      <td>${u.access==='admin'?'<span class="badge badge-admin">Admin</span>':u.access==='management'?'<span class="badge badge-gold">Management</span>':'<span class="badge badge-medium">Plant User</span>'}</td>
-      <td>${u.plant?`<span class="user-plant-badge">${xe(u.plant)}</span>`:`<span style="color:var(--slate);font-size:11px">All</span>`}</td>
+      <td>${u.access==='admin'?'<span class="badge badge-admin">Admin</span>':u.access==='management'?'<span class="badge badge-gold">Management</span>':`<span class="badge badge-medium">Plant User${getUserPlants(u).length>1?' ('+getUserPlants(u).length+' plants)':''}</span>`}</td>
+      <td>${(() => {
+        const up = getUserPlants(u);
+        if (!up.length) return '<span style="color:var(--slate);font-size:11px">All</span>';
+        return up.map(p=>`<span class="user-plant-badge" style="margin:1px 2px;display:inline-block">${xe(p)}</span>`).join('');
+      })()}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn btn-ghost btn-sm" onclick="openEditUser('${id}')">Edit</button>
         ${id!==currentUser.id&&id!=='admin'?`<button class="btn btn-danger btn-sm" onclick="deleteUser('${id}','${xe(u.name)}')">Delete</button>`:''}
@@ -3085,7 +3119,12 @@ function _umDraw(el) {
   el.innerHTML = `<div class="card">
     <div class="card-header" style="flex-wrap:wrap;gap:8px">
       <div class="card-title">👥 Users <span style="font-size:12px;font-weight:400;color:var(--slate);margin-left:4px">(${all.length} total)</span></div>
-      <button class="btn btn-gold btn-sm" onclick="openCreateUser()">+ Create User</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="exportUsersCSV()" title="Export users as CSV">⬇ CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportUsersPDF()" title="Export users as PDF">⬇ PDF</button>
+        <button class="btn btn-ghost btn-sm" onclick="openBulkUploadUsers()" title="Bulk import users from CSV">📤 Bulk Import</button>
+        <button class="btn btn-gold btn-sm" onclick="openCreateUser()">+ Create User</button>
+      </div>
     </div>
     <div style="display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--navy3);flex-wrap:wrap;align-items:center">
       <div style="position:relative;flex:1;min-width:160px">
@@ -3151,8 +3190,19 @@ function userForm(id, u) {
       </select>
     </div>
     <div class="fg" id="uf_plant_wrap" style="${(u?.access==='plant'||!u)?'':'display:none'}">
-      <label>Plant <span class="req">*</span></label>
-      <select id="uf_plant">${PLANTS.map(p=>`<option${u?.plant===p?' selected':''}>${p}</option>`).join('')}</select>
+      <label>Plant Assignment <span class="req">*</span></label>
+      <div id="uf_plants_list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+        ${PLANTS.map(p => {
+          const userPlantsArr = getUserPlants(u);
+          const chk = userPlantsArr.includes(p) ? 'checked' : (!u && PLANTS.indexOf(p)===0 ? '' : '');
+          return `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;background:var(--navy4);border:1px solid var(--border);border-radius:8px;font-size:13px;user-select:none;transition:border-color .15s" onmouseover="this.style.borderColor='var(--gold-bdr)'" onmouseout="this.style.borderColor=''">
+            <input type="checkbox" name="uf_plant_cb" value="${p}" ${chk}
+              style="accent-color:var(--gold);width:14px;height:14px;cursor:pointer">
+            <span style="color:var(--white)">${p}</span>
+          </label>`;
+        }).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--slate);margin-top:6px">✓ Select one or more plants. User will see records from all assigned plants.</div>
     </div>
     <div class="fg"><label>Password <span class="req">${isEdit?'(leave blank to keep)':'*'}</span></label><input type="password" id="uf_pass" placeholder="${isEdit?'New password (optional)':'Set a password'}"></div>
     <div class="fg" style="grid-column:1/-1">
@@ -3168,7 +3218,13 @@ function userForm(id, u) {
 function togglePlantField() {
   const access = document.getElementById('uf_access')?.value;
   const wrap = document.getElementById('uf_plant_wrap');
-  if (wrap) wrap.style.display = access === 'plant' ? '' : 'none';
+  if (wrap) {
+    wrap.style.display = access === 'plant' ? '' : 'none';
+    // Clear all checkboxes when switching away from plant role
+    if (access !== 'plant') {
+      wrap.querySelectorAll('input[name="uf_plant_cb"]').forEach(cb => cb.checked = false);
+    }
+  }
 }
 
 function saveUser(editId) {
@@ -3178,7 +3234,11 @@ function saveUser(editId) {
   const initials= (document.getElementById('uf_initials')?.value||'').trim().toUpperCase() || name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   const email   = (document.getElementById('uf_email')?.value||'').trim();
   const access  = document.getElementById('uf_access')?.value || 'plant';
-  const plant   = access === 'plant' ? (document.getElementById('uf_plant')?.value||PLANTS[0]) : null;
+  let plants = null;
+  if (access === 'plant') {
+    plants = [...document.querySelectorAll('input[name="uf_plant_cb"]:checked')].map(cb => cb.value);
+  }
+  const plant   = plants && plants.length > 0 ? plants[0] : null;
   const pass    = (document.getElementById('uf_pass')?.value||'').trim();
   const errEl   = document.getElementById('uf_err');
   errEl.classList.remove('show'); errEl.textContent='';
@@ -3187,12 +3247,14 @@ function saveUser(editId) {
   if (!isEdit && !idVal) { errEl.textContent='Username is required.'; errEl.classList.add('show'); return; }
   if (!isEdit && _usersData[idVal]) { errEl.textContent='Username already exists.'; errEl.classList.add('show'); return; }
   if (!isEdit && pass.length < 6) { errEl.textContent='Password must be at least 6 characters.'; errEl.classList.add('show'); return; }
+  if (access === 'plant' && (!plants || plants.length === 0)) { errEl.textContent='Please select at least one plant.'; errEl.classList.add('show'); return; }
 
   const existing = isEdit ? (_usersData[editId]||{}) : {};
   _usersData[idVal] = {
     ...existing,
     name, initials, email, access,
-    plant: plant || null,
+    plant:  plant  || null,
+    plants: plants || null,
     role: access==='admin'?'Administrator':access==='management'?'Top Management':'Plant User',
     password: (pass.length>=6) ? pass : (existing.password||''),
   };
@@ -3220,6 +3282,372 @@ This action cannot be undone.`)) return;
   toast('✓ Deleted', name + ' removed successfully.');
   const el = document.getElementById('settingsContent');
   if (el) renderUserManagement(el);
+}
+
+/* ══════════════════════════════════════════════════════════
+   USER EXPORT — CSV & PDF
+══════════════════════════════════════════════════════════ */
+function exportUsersCSV() {
+  const users = Object.entries(_usersData).filter(([,u]) => !u.hidden);
+  if (!users.length) { toast('No Users', 'No users to export.', true); return; }
+  const headers = ['Username','Full Name','Initials','Email','Role','Plant Access'];
+  const rows = users.map(([id, u]) => [
+    id,
+    u.name || '',
+    u.initials || '',
+    u.email || '',
+    u.access === 'admin' ? 'Administrator' : u.access === 'management' ? 'Top Management' : 'Plant User',
+    getUserPlants(u).join(', ') || 'All Plants',
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `plantvisit_users_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  toast('⬇ Users Exported', `${users.length} users exported as CSV.`);
+}
+
+function exportUsersPDF() {
+  const users = Object.entries(_usersData).filter(([,u]) => !u.hidden);
+  if (!users.length) { toast('No Users', 'No users to export.', true); return; }
+  const company = _settingsData?.app?.companyName || 'PlantVisit';
+  const now = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const ROLE_COLOR = { admin:'#e05555', management:'#e8c547', plant:'#5abf7a' };
+
+  const rows = users.map(([id, u]) => {
+    const rc = ROLE_COLOR[u.access] || '#8888aa';
+    const roleLabel = u.access === 'admin' ? 'Administrator' : u.access === 'management' ? 'Top Management' : 'Plant User';
+    return `<tr>
+      <td style="font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:30px;height:30px;border-radius:50%;background:${rc}20;border:1.5px solid ${rc}55;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${rc};flex-shrink:0">${u.initials||id.slice(0,2).toUpperCase()}</div>
+          <div>
+            <div style="font-weight:600;color:#1a1a2e">${u.name||''}</div>
+            <div style="font-size:10px;color:#888">${u.email||''}</div>
+          </div>
+        </div>
+      </td>
+      <td style="font-size:11px;color:#555"><code style="background:#f4f4fb;padding:2px 8px;border-radius:4px;font-size:11px">${id}</code></td>
+      <td><span style="background:${rc}20;color:${rc};border:1px solid ${rc}55;border-radius:50px;padding:2px 10px;font-size:10px;font-weight:600;white-space:nowrap">${roleLabel}</span></td>
+      <td style="font-size:11px;color:#555">${getUserPlants(u).length > 0 ? getUserPlants(u).map(p=>`<span style="display:inline-block;background:${rc}15;border:1px solid ${rc}44;border-radius:50px;padding:1px 8px;font-size:10px;color:${rc};margin:1px 2px">${p}</span>`).join('') : '<span style="color:#aaa">All Plants</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PlantVisit — Users Report</title>
+<style>
+  @page { margin: 16mm 12mm; size: A4 portrait; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1a1a2e; font-size: 12px; }
+  .header { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 0 12px; border-bottom: 2px solid #e8c547; margin-bottom: 16px; }
+  .brand { font-size: 22px; font-weight: 700; color: #0f0f1a; letter-spacing: -0.5px; }
+  .brand span { color: #e8c547; }
+  .meta { font-size: 10px; color: #888; text-align: right; line-height: 1.6; }
+  .summary { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .sum-pill { background: #f4f4fb; border: 1px solid #e0e0f0; border-radius: 20px; padding: 5px 14px; font-size: 11px; color: #444; }
+  .sum-pill strong { color: #1a1a2e; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: #0f0f1a; color: #e8c547; }
+  thead th { padding: 8px 10px; text-align: left; font-size: 9px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid #eeeef8; }
+  tbody tr:nth-child(even) { background: #fafafe; }
+  tbody td { padding: 9px 10px; vertical-align: middle; }
+  .footer { margin-top: 14px; font-size: 9px; color: #aaa; text-align: center; border-top: 1px solid #eee; padding-top: 8px; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="brand">Plant<span>Visit</span></div>
+    <div style="font-size:11px;color:#888;margin-top:2px">${company} · User Directory Report</div>
+  </div>
+  <div class="meta">Generated: ${now}<br>Total Users: ${users.length}<br>Exported by: ${currentUser?.name||'Admin'}</div>
+</div>
+<div class="summary">
+  <div class="sum-pill">Total <strong>${users.length}</strong></div>
+  <div class="sum-pill">Admins <strong style="color:#e05555">${users.filter(([,u])=>u.access==='admin').length}</strong></div>
+  <div class="sum-pill">Management <strong style="color:#e8c547">${users.filter(([,u])=>u.access==='management').length}</strong></div>
+  <div class="sum-pill">Plant Users <strong style="color:#5abf7a">${users.filter(([,u])=>u.access==='plant').length}</strong></div>
+</div>
+<table>
+  <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Plant Access</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<div class="footer">PlantVisit · ${company} · Confidential — Generated ${now} · ${users.length} user${users.length!==1?'s':''}</div>
+<script>window.onload=function(){window.print();}<\/script>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { toast('Popup Blocked', 'Please allow popups for PDF export.', true); return; }
+  win.document.write(html);
+  win.document.close();
+  toast('📄 Users PDF Ready', `Print dialog opened for ${users.length} users.`);
+}
+
+/* ══════════════════════════════════════════════════════════
+   USER BULK IMPORT — CSV Upload
+══════════════════════════════════════════════════════════ */
+const USER_UPLOAD_COLS     = ['username','name','initials','email','role','plant','password'];
+const USER_UPLOAD_REQUIRED = ['username','name','role','password'];
+const USER_ROLES_VALID     = ['admin','management','plant'];
+let _userUploadRows  = [];
+let _userUploadPhase = 1;
+let _userUploadSkip  = new Set();
+
+function openBulkUploadUsers() {
+  ['modal-sm','modal-lg','modal-xl'].forEach(cls => document.getElementById('modalBox').classList.remove(cls));
+  document.getElementById('modalBox').classList.add('modal-lg');
+  document.getElementById('modalTitle').textContent = '📤 Bulk Import Users';
+  document.getElementById('modalBody').innerHTML = `<div id="userUploadBody"></div>`;
+  document.getElementById('overlay').classList.add('open');
+  _userUploadPhase = 1; _userUploadRows = []; _userUploadSkip = new Set();
+  renderUserUploadPhase1();
+}
+
+function renderUserUploadPhase1() {
+  const el = document.getElementById('userUploadBody');
+  if (!el) return;
+  el.innerHTML = `
+  <div style="margin-bottom:14px">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--gold-bg);border:1px solid var(--gold-bdr);font-size:12px;font-weight:600;color:var(--gold)">1 Upload CSV</div>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--navy3);border:1px solid var(--border);font-size:12px;color:var(--slate)">2 Preview</div>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--navy3);border:1px solid var(--border);font-size:12px;color:var(--slate)">3 Import</div>
+    </div>
+  </div>
+  <div style="border:2px dashed var(--border2);border-radius:10px;padding:28px;text-align:center;cursor:pointer;margin-bottom:14px;transition:border-color .2s"
+    id="userDropZone"
+    onclick="document.getElementById('userCsvInput').click()"
+    ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
+    ondragleave="this.style.borderColor=''"
+    ondrop="handleUserUploadDrop(event)">
+    <input type="file" id="userCsvInput" accept=".csv,text/csv" style="display:none" onchange="handleUserUploadFile(this.files[0])">
+    <div style="font-size:28px;margin-bottom:8px">📄</div>
+    <div style="font-size:14px;font-weight:600;color:var(--white);margin-bottom:4px">Drag &amp; drop a CSV or click to browse</div>
+    <div style="font-size:12px;color:var(--slate)">Required columns: <strong style="color:var(--gold)">username, name, role, password</strong></div>
+  </div>
+  <div style="margin-bottom:10px">
+    <div style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Column Reference</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${USER_UPLOAD_COLS.map(c=>`<span style="padding:3px 10px;border-radius:20px;font-size:11px;${USER_UPLOAD_REQUIRED.includes(c)?'background:var(--gold-bg);border:1px solid var(--gold-bdr);color:var(--gold);font-weight:600':'background:var(--navy4);border:1px solid var(--border);color:var(--slate2)'}">${USER_UPLOAD_REQUIRED.includes(c)?'★ ':''}${c}</span>`).join('')}
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--slate)">
+      <strong style="color:var(--slate2)">role</strong> accepts: <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">admin</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">management</code> <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">plant</code> &nbsp;·&nbsp;
+      <strong style="color:var(--slate2)">plant</strong> required when role=plant — supports multiple plants comma-separated (e.g. <code style="background:var(--navy4);padding:1px 5px;border-radius:3px">Pune,Chennai</code>)
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+    <button class="btn btn-ghost btn-sm" onclick="downloadUserTemplate()">⬇ Download Template</button>
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+  </div>`;
+}
+
+function downloadUserTemplate() {
+  const header = USER_UPLOAD_COLS.join(',');
+  const example = [
+    ['ramu_pune','Ramesh Kumar','RK','ramu@company.com','plant','Pune','plant@2025'],
+    ['ramu_multi','Suresh Verma','SV','suresh@company.com','plant','Pune,Chennai','plant@2025'],
+    ['priya_mgmt','Priya Sharma','PS','priya@company.com','management','','mgmt@2025'],
+  ].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(header+'\n'+example+'\n');
+  a.download = 'plantvisit_user_template.csv';
+  a.click();
+  toast('Template Downloaded', 'Fill in the CSV and upload it.');
+}
+
+function handleUserUploadDrop(e) {
+  e.preventDefault();
+  document.getElementById('userDropZone').style.borderColor='';
+  const file = e.dataTransfer?.files?.[0];
+  if (file) handleUserUploadFile(file);
+}
+
+function handleUserUploadFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.csv')) { toast('Invalid File', 'Please upload a .csv file.', true); return; }
+  if (file.size > 2*1024*1024) { toast('File Too Large', 'Max 2 MB.', true); return; }
+  const reader = new FileReader();
+  reader.onload = e => parseUserUploadCSV(e.target.result);
+  reader.onerror = () => toast('Read Error', 'Could not read file.', true);
+  reader.readAsText(file, 'UTF-8');
+}
+
+function parseUserUploadCSV(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(l=>l.trim());
+  if (lines.length < 2) { toast('Empty File','Need header + at least 1 row.',true); return; }
+  if (lines.length > 501) { toast('Too Many Rows','Max 500 users per upload.',true); return; }
+  const header = parseCSVLine(lines[0]).map(h=>h.trim().toLowerCase().replace(/\s+/g,'_'));
+  const colIdx = {};
+  USER_UPLOAD_COLS.forEach(c => { colIdx[c] = header.indexOf(c); });
+  const missing = USER_UPLOAD_REQUIRED.filter(c => colIdx[c] === -1);
+  if (missing.length) { toast('Missing Columns', 'Required: '+missing.join(', '), true); return; }
+  _userUploadRows = lines.slice(1).map((line, idx) => {
+    const cells = parseCSVLine(line);
+    const g = col => colIdx[col] >= 0 ? (cells[colIdx[col]] || '').trim() : '';
+    const r = {
+      _idx: idx,
+      username: g('username').toLowerCase().replace(/\s+/g,'_'),
+      name: g('name'),
+      initials: g('initials') || g('name').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
+      email: g('email'),
+      role: g('role').toLowerCase(),
+      plant: g('plant'),
+      password: g('password'),
+      _valid: false,
+      _errors: [],
+    };
+    // Validate
+    if (!r.username) r._errors.push('Username is required');
+    else if (!/^[a-z0-9_]+$/.test(r.username)) r._errors.push('Username: only lowercase letters, numbers, underscore');
+    if (!r.name) r._errors.push('Name is required');
+    if (!r.password || r.password.length < 6) r._errors.push('Password must be ≥6 chars');
+    if (!USER_ROLES_VALID.includes(r.role)) r._errors.push('Role must be: admin, management, or plant');
+    if (r.role === 'plant' && !r.plant) r._errors.push('Plant is required for role=plant');
+    if (r.role === 'plant' && r.plant) {
+      const plantList = r.plant.split(',').map(p=>p.trim()).filter(Boolean);
+      const invalidPlants = plantList.filter(p => !PLANTS.includes(p));
+      if (invalidPlants.length) r._errors.push(`Plant(s) not found: ${invalidPlants.join(', ')}`);
+      else r.plants = plantList;  // store resolved plants array on row
+    }
+    if (!r._errors.length) r._valid = true;
+    return r;
+  });
+  renderUserUploadPhase2();
+}
+
+function renderUserUploadPhase2() {
+  _userUploadPhase = 2;
+  const el = document.getElementById('userUploadBody');
+  if (!el) return;
+  const total    = _userUploadRows.length;
+  const okRows   = _userUploadRows.filter(r=>r._valid && !_userUploadSkip.has(r._idx));
+  const errRows  = _userUploadRows.filter(r=>!r._valid);
+  const skipCnt  = _userUploadSkip.size;
+  const ROLE_C   = {admin:'var(--red)',management:'var(--gold)',plant:'var(--green)'};
+
+  const rows = _userUploadRows.map(r => {
+    const skipped  = _userUploadSkip.has(r._idx);
+    const rowStyle = skipped ? 'opacity:.45' : (!r._valid ? 'background:var(--red-bg)' : '');
+    const badge    = skipped
+      ? `<span style="font-size:10px;color:var(--slate)">— Skip</span>`
+      : r._valid
+        ? `<span style="font-size:10px;color:var(--green);font-weight:600">✓ OK</span>`
+        : `<span style="font-size:10px;color:var(--red);font-weight:600">✗ Error</span>`;
+    const duplicate = _usersData[r.username] ? `<span style="font-size:10px;color:var(--orange)">⚠ exists</span>` : '';
+    return `<tr style="${rowStyle}">
+      <td style="font-size:10px;color:var(--slate)">${r._idx+1}</td>
+      <td>${badge}${r._errors.length ? `<div style="font-size:9px;color:var(--red);margin-top:2px" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div>`:''}</td>
+      <td><code style="font-size:11px;background:var(--navy4);padding:1px 6px;border-radius:4px">${xe(r.username)}</code>${duplicate}</td>
+      <td style="font-size:12px">${xe(r.name)}</td>
+      <td style="font-size:11px;color:var(--slate)">${xe(r.email)}</td>
+      <td><span style="color:${ROLE_C[r.role]||'var(--slate)'};font-size:11px;font-weight:600">${r.role||'—'}</span></td>
+      <td style="font-size:11px;color:var(--slate)">${r.plants && r.plants.length > 1 ? r.plants.join(', ') : (r.plant||'—')}</td>
+      <td>
+        <button onclick="toggleUserUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:1px 8px;font-size:10px;cursor:pointer;color:var(--slate2)">
+          ${skipped?'Include':'Skip'}
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+  <div style="margin-bottom:14px">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--green-bg);border:1px solid rgba(90,191,122,.25);font-size:12px;font-weight:600;color:var(--green)">✓ Upload CSV</div>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--gold-bg);border:1px solid var(--gold-bdr);font-size:12px;font-weight:600;color:var(--gold)">2 Preview</div>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--navy3);border:1px solid var(--border);font-size:12px;color:var(--slate)">3 Import</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <div style="flex:1;min-width:100px;background:var(--navy3);border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:var(--white)">${total}</div><div style="font-size:11px;color:var(--slate)">Total Rows</div>
+    </div>
+    <div style="flex:1;min-width:100px;background:var(--navy3);border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:var(--green)">${okRows.length}</div><div style="font-size:11px;color:var(--slate)">Ready</div>
+    </div>
+    <div style="flex:1;min-width:100px;background:var(--navy3);border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:var(--red)">${errRows.length}</div><div style="font-size:11px;color:var(--slate)">Errors</div>
+    </div>
+    <div style="flex:1;min-width:100px;background:var(--navy3);border-radius:8px;padding:12px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:var(--slate)">${skipCnt}</div><div style="font-size:11px;color:var(--slate)">Skipped</div>
+    </div>
+  </div>
+  ${errRows.length ? `<div class="alert alert-warn" style="margin-bottom:12px">⚠ <strong>${errRows.length} row${errRows.length>1?'s have':' has'} errors</strong> and will be excluded unless you fix them.</div>` : ''}
+  <div style="overflow-x:auto;max-height:280px;border-radius:8px;border:1px solid var(--border)">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--navy3);position:sticky;top:0">
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">#</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">Valid</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">Username</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">Name</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">Email</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">Role</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2);white-space:nowrap">Plant</th>
+          <th style="padding:7px 8px;text-align:left;font-size:10px;color:var(--slate2)"></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px">
+    <button class="btn btn-ghost btn-sm" onclick="_userUploadPhase=1;renderUserUploadPhase1()">← Back</button>
+    <button class="btn btn-gold" id="btnDoUserImport" onclick="executeUserImport()" ${okRows.length===0?'disabled':''}>
+      ✦ Import ${okRows.length} User${okRows.length!==1?'s':''}
+    </button>
+  </div>`;
+}
+
+function toggleUserUploadRow(idx) {
+  if (_userUploadSkip.has(idx)) _userUploadSkip.delete(idx);
+  else _userUploadSkip.add(idx);
+  renderUserUploadPhase2();
+}
+
+async function executeUserImport() {
+  const toImport = _userUploadRows.filter(r => r._valid && !_userUploadSkip.has(r._idx));
+  if (!toImport.length) { toast('Nothing to Import', 'No valid rows selected.', true); return; }
+  const btn = document.getElementById('btnDoUserImport');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+  let imported = 0, skippedDup = 0;
+  toImport.forEach(r => {
+    if (_usersData[r.username]) skippedDup++;  // overwrite existing
+    const importedPlants = r.role === 'plant' ? (r.plants || (r.plant ? [r.plant] : [])) : null;
+    _usersData[r.username] = {
+      name: r.name,
+      initials: r.initials,
+      email: r.email,
+      access: r.role,
+      plant:  importedPlants && importedPlants.length > 0 ? importedPlants[0] : null,
+      plants: importedPlants || null,
+      role: r.role === 'admin' ? 'Administrator' : r.role === 'management' ? 'Top Management' : 'Plant User',
+      password: r.password,
+    };
+    imported++;
+  });
+  saveUsers();
+  const el = document.getElementById('userUploadBody');
+  if (el) el.innerHTML = `
+    <div style="text-align:center;padding:28px 0">
+      <div style="font-size:36px;margin-bottom:12px">🎉</div>
+      <div style="font-size:18px;font-weight:600;color:var(--white);margin-bottom:6px">Import Complete</div>
+      <div style="font-size:13px;color:var(--slate);margin-bottom:20px">${imported} user${imported!==1?'s':''} imported${skippedDup?`, ${skippedDup} updated`:''}.</div>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-gold" onclick="closeModal();const e=document.getElementById('settingsContent');if(e)renderUserManagement(e)">View Users →</button>
+        <button class="btn btn-ghost" onclick="_userUploadPhase=1;_userUploadRows=[];_userUploadSkip=new Set();renderUserUploadPhase1()">Upload Another</button>
+      </div>
+    </div>`;
+  toast(`✦ ${imported} Users Imported`, `Bulk user import complete.`);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -3389,11 +3817,12 @@ function renderRecords(el) {
   }).filter(Boolean))].sort();
 
   // Plant tabs (admin/management only)
-  const plantTabsHtml = currentUser.access !== 'plant' ? `
+  const _curUserPlants = getUserPlants(currentUser);
+  const plantTabsHtml = (currentUser.access !== 'plant' || _curUserPlants.length > 1) ? `
   <div class="filter-tab-row">
     <span class="filter-tab-label">🏭 Plant</span>
-    <button class="ftab plant-tab${!pf.plant?' active':''}" onclick="setPlantFilter('')">All</button>
-    ${PLANTS.map(p=>`<button class="ftab plant-tab${pf.plant===p?' active':''}" onclick="setPlantFilter('${p}')">${p}</button>`).join('')}
+    <button class="ftab plant-tab${!pf.plant?' active':''}" onclick="setPlantFilter('')">${currentUser.access==='plant'?'All My Plants':'All'}</button>
+    ${(currentUser.access !== 'plant' ? PLANTS : _curUserPlants).map(p=>`<button class="ftab plant-tab${pf.plant===p?' active':''}" onclick="setPlantFilter('${p}')">${p}</button>`).join('')}
   </div>` : '';
 
   // Month tabs
@@ -3510,7 +3939,7 @@ function renderPlantSettings(el) {
       <button class="btn btn-gold btn-sm" onclick="openAddPlant()">+ Add Plant</button>
     </div>
     <div class="alert alert-info" style="margin-bottom:16px;font-size:12px">
-      🏭 Plants defined here appear in the visit form, user assignments, and dashboard. Deleting a plant does not remove existing visit records — it only removes it from future entries.
+      🏭 Plants defined here appear in the visit form, user assignments, and dashboard. Plant users can be assigned to <strong>one or more plants</strong> — they will see records from all their assigned plants. Deleting a plant does not remove existing visit records — it only removes it from future entries.
     </div>
     <div class="table-wrap">
       <table>
