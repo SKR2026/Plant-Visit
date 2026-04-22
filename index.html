@@ -876,9 +876,10 @@ try {
   firebase.initializeApp(firebaseConfig);
   db = firebase.firestore();
 } catch(e) { console.warn('Firebase init failed — running in offline mode:', e); }
-const VISITS_COL = 'visits';
-const MAIL_DOC   = db.collection('config').doc('mailLogs');
-const USERS_DOC  = db.collection('config').doc('appUsers');
+const VISITS_COL  = 'visits';
+const MAIL_DOC    = db.collection('config').doc('mailLogs');
+const USERS_DOC   = db.collection('config').doc('appUsers');   // legacy – kept for migration read
+const USERS_COL   = 'appUsers';                                // ★ NEW: one doc per user
 const SETTINGS_DOC = db.collection('config').doc('appSettings');
 
 /* ══════════════════════════════════════════════════════════
@@ -1052,18 +1053,27 @@ function saveMail(mails) {
 let _deletedDefaultUsers = JSON.parse(localStorage.getItem('pv_deleted_defaults') || '[]');
 
 function _persistUsers() {
-  // Save custom users to localStorage (instant, no network) — for offline fallback
+  // ── localStorage fallback (offline / instant) ──────────────────────────
   const customOnly = {};
   Object.entries(_usersData).forEach(([id, u]) => {
-    if (!DEFAULT_USERS[id]) customOnly[id] = u;   // only custom users
+    if (!DEFAULT_USERS[id]) customOnly[id] = u;
   });
   localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
   localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
 
-  // Push FULL user map to Firestore (including all custom users with passwords)
-  // This ensures users survive page reload/app restart — Firestore is the primary store
-  USERS_DOC.set({ users: _usersData, deletedDefaults: _deletedDefaultUsers })
-    .catch(e => console.error('saveUsers Firestore error:', e));
+  // ── Firestore: one document per user (avoids 1 MB document limit) ──────
+  // Each user is stored in appUsers/<userId>  instead of one giant doc.
+  // This is safe for any number of users and any size of user record.
+  const batch = db.batch();
+  Object.entries(_usersData).forEach(([id, u]) => {
+    batch.set(db.collection(USERS_COL).doc(id), { ...u, _id: id });
+  });
+  // Record which default users were explicitly deleted
+  batch.set(
+    db.collection('config').doc('appUsersMeta'),
+    { deletedDefaults: _deletedDefaultUsers }
+  );
+  batch.commit().catch(e => console.error('saveUsers Firestore error:', e));
 }
 
 function saveUsers() { _persistUsers(); }
@@ -1111,45 +1121,82 @@ function initFirestoreListeners() {
     if (_appReady) updateBadges();
   }, e => console.error(e));
 
-  USERS_DOC.onSnapshot(doc => {
-    if (doc.exists && doc.data().users) {
-      const firestoreUsers = doc.data().users;
-      // Sync deletion list from Firestore
-      const fsDeleted = doc.data().deletedDefaults || [];
-      fsDeleted.forEach(id => { if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id); });
-      localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+  // ── Users listener: collection-per-user (new format) ──────────────────
+  // Also performs a one-time migration from the old single-doc format.
+  db.collection(USERS_COL).onSnapshot(snapshot => {
+    if (snapshot.docs.length > 0) {
+      // ★ New format: each doc is one user
+      const firestoreUsers = {};
+      snapshot.docs.forEach(d => {
+        const data = d.data();
+        const uid  = data._id || d.id;
+        const { _id, ...rest } = data;   // strip internal _id field
+        firestoreUsers[uid] = rest;
+      });
 
       // Build base: DEFAULT_USERS minus deleted ones
       const base = {};
       Object.entries(DEFAULT_USERS).forEach(([id, u]) => {
         if (!_deletedDefaultUsers.includes(id)) base[id] = u;
       });
-      // Merge Firestore users on top — Firestore is the source of truth for custom users
       const merged = { ...base, ...firestoreUsers };
-      // Remove any user that was explicitly deleted
       _deletedDefaultUsers.forEach(id => { delete merged[id]; });
-      // FIX: For default accounts, restore access/hidden but KEEP Firestore password if it was changed
-      // Only restore password if the Firestore entry doesn't have one set (prevents lockout recovery issues)
+
+      // Keep passwords/access consistent for default accounts
       Object.keys(DEFAULT_USERS).forEach(key => {
         if (merged[key] && !_deletedDefaultUsers.includes(key)) {
-          // Keep whatever password is in Firestore (could be admin-changed); restore access + hidden from defaults
           const fsPass = firestoreUsers[key]?.password;
           merged[key] = {
             ...merged[key],
             access: DEFAULT_USERS[key].access,
             hidden: DEFAULT_USERS[key].hidden,
-            // Use Firestore password if explicitly saved there, else fall back to default
             password: fsPass || DEFAULT_USERS[key].password,
           };
         }
       });
       _usersData = merged;
-      // Keep localStorage in sync with Firestore truth
+
       const customOnly = {};
       Object.entries(_usersData).forEach(([id, u]) => { if (!DEFAULT_USERS[id]) customOnly[id] = u; });
       localStorage.setItem('pv_users_custom', JSON.stringify(customOnly));
+
+    } else {
+      // No docs yet — attempt one-time migration from old single-doc format
+      USERS_DOC.get().then(doc => {
+        if (doc.exists && doc.data().users) {
+          console.log('[PlantVisit] Migrating users from legacy single-doc to per-doc collection…');
+          const legacyUsers = doc.data().users;
+          const legacyDeleted = doc.data().deletedDefaults || [];
+          legacyDeleted.forEach(id => {
+            if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id);
+          });
+          localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+
+          // Write each legacy user into the new collection
+          const migBatch = db.batch();
+          Object.entries(legacyUsers).forEach(([id, u]) => {
+            migBatch.set(db.collection(USERS_COL).doc(id), { ...u, _id: id });
+          });
+          migBatch.set(
+            db.collection('config').doc('appUsersMeta'),
+            { deletedDefaults: _deletedDefaultUsers }
+          );
+          migBatch.commit()
+            .then(() => console.log('[PlantVisit] User migration complete.'))
+            .catch(e => console.error('[PlantVisit] Migration error:', e));
+        }
+      }).catch(e => console.warn('Legacy user doc read error:', e));
     }
-  }, e => console.error(e));
+  }, e => console.error('Users collection listener error:', e));
+
+  // Also sync the deletedDefaults meta doc
+  db.collection('config').doc('appUsersMeta').onSnapshot(doc => {
+    if (doc.exists) {
+      const fsDeleted = doc.data().deletedDefaults || [];
+      fsDeleted.forEach(id => { if (!_deletedDefaultUsers.includes(id)) _deletedDefaultUsers.push(id); });
+      localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
+    }
+  }, e => console.warn('appUsersMeta listener error:', e));
 
   SETTINGS_DOC.onSnapshot(doc => {
     if (doc.exists) {
@@ -3278,6 +3325,8 @@ This action cannot be undone.`)) return;
     localStorage.setItem('pv_deleted_defaults', JSON.stringify(_deletedDefaultUsers));
   }
   delete _usersData[id];
+  // ★ Remove from Firestore collection (new per-doc format)
+  db.collection(USERS_COL).doc(id).delete().catch(e => console.error('deleteUser Firestore error:', e));
   saveUsers();
   toast('✓ Deleted', name + ' removed successfully.');
   const el = document.getElementById('settingsContent');
