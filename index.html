@@ -1179,7 +1179,11 @@ function bootApp() {
     document.body.classList.add('light');
     document.getElementById('themeBtn').textContent = '☀️';
   }
-  setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
+  // Hide loader and make sure login screen is visible
+  const pl = document.getElementById('pageLoader');
+  if (pl) pl.classList.add('hidden');
+  const ls = document.getElementById('loginScreen');
+  if (ls) ls.classList.remove('hidden');
 }
 
 /**
@@ -4222,11 +4226,18 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     document.getElementById('pageLoader').classList.add('hidden');
   }, 800);
-  // Hard failsafe - force show login if still loading after 3s
+  // Hard failsafe - force show login if still loading after 5s (Firebase timeout)
   setTimeout(() => {
     const pl = document.getElementById('pageLoader');
-    if (pl && !pl.classList.contains('hidden')) pl.classList.add('hidden');
-  }, 3000);
+    if (pl && !pl.classList.contains('hidden')) {
+      pl.classList.add('hidden');
+      // If Firebase never responded, boot the app in offline mode so login still works
+      if (!_appReady) {
+        _loadLocalUsers();
+        bootApp();
+      }
+    }
+  }, 5000);
 
   // Sign in anonymously to satisfy Firestore auth rules, then start listeners
   try {
