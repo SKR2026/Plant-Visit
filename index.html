@@ -4506,6 +4506,9 @@ function renderUploadPhase2() {
     const errCell = r._errors.length
       ? `<div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div>`
       : '';
+    const warnCell = (r._warnings && r._warnings.length)
+      ? `<div style="font-size:10px;color:var(--orange)" title="${xe(r._warnings.join('; '))}">⚠ ${r._warnings[0]}</div>`
+      : '';
     const toggleBtn = `<button onclick="toggleUploadRow(${r._idx})" title="${isSkipped?'Include this row':'Exclude this row'}"
       style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">
       ${isSkipped?'Include':'Skip'}
@@ -4513,7 +4516,7 @@ function renderUploadPhase2() {
 
     return `<tr class="${rowClass}">
       <td style="color:var(--slate);font-size:10px">${r._idx+1}</td>
-      <td>${statusCell}${errCell?`<div style="margin-top:3px">${errCell}</div>`:''}</td>
+      <td>${statusCell}${errCell?`<div style="margin-top:3px">${errCell}</div>`:''}${warnCell?`<div style="margin-top:2px">${warnCell}</div>`:''}</td>
       <td style="white-space:nowrap">${xe(r.confirm_date||'')}</td>
       <td style="white-space:nowrap">${xe(r.visit_date||'')}${r.visit_date_end?`<span style="color:var(--slate);font-size:10px;display:block">→ ${xe(r.visit_date_end)}</span>`:''}</td>
       <td>${xe(r.plant||'')}</td>
@@ -4572,10 +4575,10 @@ function renderUploadPhase2() {
       <table class="preview-table">
         <thead>
           <tr>
-            <th>#</th><th>Status</th>
+            <th>#</th><th>Validation</th>
             <th>Confirm Date</th><th>Visit Date</th><th>Plant</th>
             <th>Company</th><th>Rep</th><th>Category</th>
-            <th>Criticality</th><th>Status</th><th>Stay</th><th></th>
+            <th>Criticality</th><th>Visit Status</th><th>Stay</th><th></th>
           </tr>
         </thead>
         <tbody id="uploadTbody">${rows}</tbody>
@@ -4681,7 +4684,7 @@ function parseUploadCSV(text) {
     toast('Too Many Rows', 'Max 2 000 data rows per upload.', true); return;
   }
 
-  // Parse header
+  // Parse header — normalise to lowercase_underscore
   const header = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/\s+/g,'_'));
 
   // Map header positions
@@ -4699,44 +4702,70 @@ function parseUploadCSV(text) {
   _uploadRows = [];
   _uploadSkip = new Set();
 
+  // Duplicate key set: company + plant + visit_date (case-insensitive)
+  // Also checked against existing _visitsData records
+  const seenKeys     = new Map(); // key → first row _idx (within CSV)
+  const existingKeys = new Set(
+    (_visitsData || []).map(v =>
+      `${(v.company||'').trim().toLowerCase()}|${(v.plant||'').toLowerCase()}|${(v.visitDate||'')}`
+    )
+  );
+
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     const cells = parseCSVLine(lines[i]);
     const get   = col => colIdx[col] >= 0 ? (cells[colIdx[col]] || '').trim() : '';
 
+    // ── Auto-resolve status (case-insensitive, default Scheduled) ────
+    const rawStatus   = get('status');
+    const statusMatch = STATUSES.find(s => s.toLowerCase() === (rawStatus||'').toLowerCase());
+    const resolvedStatus = statusMatch || (rawStatus ? rawStatus : 'Scheduled');
+
+    // ── Auto-resolve criticality (case-insensitive, default Medium) ──
+    const rawCrit   = get('criticality') || 'Medium';
+    const critMatch = CRITS.find(c => c.toLowerCase() === rawCrit.toLowerCase());
+    const resolvedCrit = critMatch || rawCrit;
+
+    // ── Auto-resolve category (case-insensitive, fallback to first) ──
+    const rawCat  = get('category') || CATEGORIES[0];
+    const catMatch = CATEGORIES.find(c => c.toLowerCase() === rawCat.toLowerCase());
+    const resolvedCat = catMatch || CATEGORIES[0];
+    const catWarning  = !catMatch ? `category "${rawCat}" unknown — auto-set to "${CATEGORIES[0]}"` : '';
+
     const row = {
       _idx:         _uploadRows.length,
       _valid:       true,
       _errors:      [],
-      _warnings:    [],
-      confirm_date: get('confirm_date'),
+      _warnings:    catWarning ? [catWarning] : [],
+      confirm_date:   get('confirm_date'),
       visit_date:     get('visit_date'),
       visit_date_end: get('visit_date_end') || '',
-      plant:        get('plant'),
-      company:      get('company'),
-      rep:          get('rep'),
-      category:     get('category') || CATEGORIES[0],
-      criticality:  get('criticality') || 'Medium',
-      focus:        get('focus'),
-      status:       (() => { const raw = get('status'); if (!raw) return 'Scheduled'; const match = STATUSES.find(s => s.toLowerCase() === raw.toLowerCase()); return match || raw; })(),
-      coordinator:  get('coordinator'),
-      attendees:    get('attendees'),
-      stay:         (get('stay')||'N').toUpperCase() === 'Y' ? 'Y' : 'N',
-      hotel:        get('hotel'),
-      remarks:      get('remarks'),
-      agenda:       get('agenda'),
+      plant:          get('plant'),
+      company:        get('company'),
+      rep:            get('rep'),
+      category:       resolvedCat,
+      criticality:    resolvedCrit,
+      focus:          get('focus'),
+      status:         resolvedStatus,
+      coordinator:    get('coordinator'),
+      attendees:      get('attendees'),
+      stay:           (get('stay')||'N').toUpperCase() === 'Y' ? 'Y' : 'N',
+      hotel:          get('hotel'),
+      remarks:        get('remarks'),
+      agenda:         get('agenda'),
     };
 
-    // ── Validation ────────────────────────────────────────
+    // ── Blocking validation ───────────────────────────────
     const errs = row._errors;
 
-    // Required fields
+    // 1. Required fields
     UPLOAD_REQUIRED.forEach(col => {
       if (!row[col]) errs.push(`"${col}" is required`);
     });
 
-    // Date format YYYY-MM-DD
-    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    // 2. Date format YYYY-MM-DD (no duplicates)
     if (row.confirm_date && !dateRe.test(row.confirm_date))
       errs.push('confirm_date must be YYYY-MM-DD');
     if (row.visit_date && !dateRe.test(row.visit_date))
@@ -4745,34 +4774,35 @@ function parseUploadCSV(text) {
       errs.push('visit_date_end must be YYYY-MM-DD');
     if (row.visit_date && row.visit_date_end && row.visit_date_end < row.visit_date)
       errs.push('visit_date_end cannot be before visit_date');
-    if (row.visit_date_end && !dateRe.test(row.visit_date_end))
-      errs.push('visit_date_end must be YYYY-MM-DD');
-    if (row.visit_date && row.visit_date_end && row.visit_date_end < row.visit_date)
-      errs.push('visit_date_end cannot be before visit_date');
 
-    // Plant must be in PLANTS list
-    if (row.plant && !PLANTS.includes(row.plant))
-      errs.push(`plant "${row.plant}" not found — valid: ${PLANTS.join(', ')}`);
-
-    // Criticality — case-insensitive match; auto-correct capitalisation
-    if (row.criticality) {
-      const critMatch = CRITS.find(c => c.toLowerCase() === row.criticality.toLowerCase());
-      if (critMatch) { row.criticality = critMatch; }
-      else errs.push(`criticality must be one of: ${CRITS.join(', ')} (got "${row.criticality}")`);
+    // 3. Plant must be in live PLANTS list (case-sensitive; guide user)
+    if (row.plant && !PLANTS.includes(row.plant)) {
+      const plantMatch = PLANTS.find(p => p.toLowerCase() === row.plant.toLowerCase());
+      if (plantMatch) { row.plant = plantMatch; } // auto-correct capitalisation
+      else errs.push(`plant "${row.plant}" not found — valid: ${PLANTS.join(', ')}`);
     }
 
-    // Status — case-insensitive match; auto-correct capitalisation
-    if (row.status) {
-      const statusMatch = STATUSES.find(s => s.toLowerCase() === row.status.toLowerCase());
-      if (statusMatch) { row.status = statusMatch; }
-      else errs.push(`status must be one of: ${STATUSES.join(', ')} (got "${row.status}")`);
+    // 4. Criticality must be valid
+    if (!critMatch)
+      errs.push(`criticality must be one of: ${CRITS.join(', ')} (got "${rawCrit}")`);
+
+    // 5. Status must be valid
+    if (!statusMatch && rawStatus)
+      errs.push(`status must be one of: ${STATUSES.join(', ')} (got "${rawStatus}")`);
+
+    // 6. Duplicate detection — against existing Firestore records
+    const dupKey = `${row.company.trim().toLowerCase()}|${(row.plant||'').toLowerCase()}|${row.visit_date}`;
+    if (errs.length === 0 && existingKeys.has(dupKey)) {
+      errs.push(`duplicate: a visit for "${row.company}" at ${row.plant} on ${row.visit_date} already exists`);
     }
 
-    // Category — warn but don't block import
-    if (row.category && !CATEGORIES.includes(row.category)) {
-      // Auto-correct to first valid category; record as warning, NOT a blocking error
-      row._warnings.push(`category "${row.category}" unknown — will use "${CATEGORIES[0]}"`);
-      row.category = CATEGORIES[0];
+    // 7. Duplicate detection — within this CSV file itself
+    if (errs.length === 0) {
+      if (seenKeys.has(dupKey)) {
+        errs.push(`duplicate of row #${seenKeys.get(dupKey) + 1} in this file (same company, plant & visit date)`);
+      } else {
+        seenKeys.set(dupKey, row._idx);
+      }
     }
 
     row._valid = errs.length === 0;
@@ -4843,8 +4873,10 @@ function refreshUploadPreview() {
     } else {
       tr.className = r._valid ? 'row-ok' : 'row-err';
       const statusHtml = r._valid ? '<span class="row-status-ok">✓ Ready</span>' : '<span class="row-status-err">✗ Error</span>';
-      const errHtml = r._errors.length ? `<div style="margin-top:3px"><div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div></div>` : '';
-      const warnHtml = (r._warnings && r._warnings.length) ? `<div style="margin-top:3px;font-size:10px;color:var(--orange)" title="${xe(r._warnings.join('; '))}">⚠ ${r._warnings[0]}</div>` : '';
+      const errHtml  = r._errors.length
+        ? `<div style="margin-top:3px"><div class="err-tooltip" title="${xe(r._errors.join('; '))}">⚠ ${r._errors.length} issue${r._errors.length>1?'s':''}</div></div>` : '';
+      const warnHtml = (r._warnings && r._warnings.length)
+        ? `<div style="margin-top:2px;font-size:10px;color:var(--orange)" title="${xe(r._warnings.join('; '))}">⚠ ${r._warnings[0]}</div>` : '';
       tr.cells[1].innerHTML = statusHtml + errHtml + warnHtml;
       tr.cells[tr.cells.length-1].innerHTML = `<button onclick="toggleUploadRow(${r._idx})" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--slate2)">Skip</button>`;
       if (r._valid && !isSkipped) okCount++;
@@ -5043,8 +5075,8 @@ window.logMail = function(record, isUpdate) {
 
 async function executeUploadImport() {
   const toImport = _uploadRows.filter(r => r._valid && !_uploadSkip.has(r._idx));
-  const skipped  = _uploadRows.filter(r => _uploadSkip.has(r._idx)).length;
-  const errors   = _uploadRows.filter(r => !r._valid).length;
+  const skipped  = _uploadSkip.size;                          // rows user explicitly skipped
+  const errors   = _uploadRows.filter(r => !r._valid).length; // rows that failed validation
 
   if (!toImport.length) {
     toast('Nothing to Import', 'No valid rows selected.', true); return;
@@ -5054,30 +5086,59 @@ async function executeUploadImport() {
   const btn = document.getElementById('btnDoImport');
   if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
 
-  // Build visit objects
+  // Build visit objects — generate unique IDs and stamp import metadata
   const now = new Date().toISOString();
-  const newVisits = toImport.map(r => ({
-    id:          'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-    confirmDate: r.confirm_date,
-    visitDate:    r.visit_date,
-    visitDateEnd: r.visit_date_end || '',
-    plant:       r.plant,
-    company:     r.company.trim(),
-    rep:         r.rep.trim(),
-    category:    r.category,
-    criticality: r.criticality,
-    focus:       r.focus.trim(),
-    status:      r.status,
-    coordinator: r.coordinator.trim(),
-    attendees:   r.attendees.trim(),
-    stay:        r.stay,
-    hotel:       r.hotel.trim(),
-    remarks:     r.remarks.trim(),
-    agenda:      r.agenda.trim(),
-    createdAt:   now,
-    createdBy:   currentUser.id,
-    importedAt:  now,
-  }));
+
+  // Final safety net: re-check against current in-memory store to block any
+  // duplicates that may have been added since the file was parsed
+  const existingKeysNow = new Set(
+    (_visitsData || []).map(v =>
+      `${(v.company||'').trim().toLowerCase()}|${(v.plant||'').toLowerCase()}|${(v.visitDate||'')}`
+    )
+  );
+
+  const newVisits = [];
+  const latedupes = [];
+  toImport.forEach(r => {
+    const key = `${r.company.trim().toLowerCase()}|${(r.plant||'').toLowerCase()}|${r.visit_date}`;
+    if (existingKeysNow.has(key)) {
+      latedupes.push(r.company);
+    } else {
+      existingKeysNow.add(key); // prevent within-batch dupes too
+      newVisits.push({
+        id:          'v' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+        confirmDate:  r.confirm_date,
+        visitDate:    r.visit_date,
+        visitDateEnd: r.visit_date_end || '',
+        plant:        r.plant,
+        company:      r.company.trim(),
+        rep:          r.rep.trim(),
+        category:     r.category,
+        criticality:  r.criticality,
+        focus:        r.focus.trim(),
+        status:       r.status,
+        coordinator:  r.coordinator.trim(),
+        attendees:    r.attendees.trim(),
+        stay:         r.stay,
+        hotel:        r.hotel.trim(),
+        remarks:      r.remarks.trim(),
+        agenda:       r.agenda.trim(),
+        createdAt:    now,
+        createdBy:    currentUser.id,
+        importedAt:   now,
+      });
+    }
+  });
+
+  if (latedupes.length) {
+    console.warn('Late duplicates blocked at write time:', latedupes);
+  }
+
+  if (!newVisits.length) {
+    toast('All Duplicates', 'Every selected row is already in the database — nothing imported.', true);
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Import Records'; }
+    return;
+  }
 
   // Firestore batched write (max 500 per batch — split if needed)
   const BATCH_SIZE = 400;
@@ -5094,8 +5155,10 @@ async function executeUploadImport() {
     // Merge into in-memory store
     _visitsData = [..._visitsData, ...newVisits];
     updateBadges();
-    renderUploadPhase3(toImport.length, skipped, errors);
-    toast(`✦ ${toImport.length} Records Imported`, `Bulk upload complete — ${toImport.length} visit${toImport.length!==1?'s':''} added.`);
+    const totalBlocked = errors + skipped + latedupes.length;
+    renderUploadPhase3(newVisits.length, skipped, errors + latedupes.length);
+    const dupNote = latedupes.length ? ` (${latedupes.length} late duplicate${latedupes.length>1?'s':''} blocked)` : '';
+    toast(`✦ ${newVisits.length} Records Imported`, `Bulk upload complete${dupNote}.`);
   } catch(e) {
     console.error('Bulk import error:', e);
     toast('Import Failed', e?.message || String(e), true);
@@ -5109,29 +5172,43 @@ async function executeUploadImport() {
 function downloadUploadTemplate() {
   const headers = UPLOAD_COLS.join(',');
   const example = [
-    '2024-04-10',           // confirm_date
-    '2024-04-18',           // visit_date
-    '2024-04-19',           // visit_date_end  (leave blank for single-day)
-    PLANTS[0],              // plant  — uses your live plant list
-    'Tata Steel Ltd',       // company
-    'Mr. Suresh Patel',     // rep
-    CATEGORIES[0],          // category — uses your live category list
-    CRITS[2],               // criticality = Medium
-    'New Order Discussion', // focus
-    STATUSES[0],            // status — uses live STATUSES list (e.g. Scheduled)
-    'Rajesh Kumar',         // coordinator
-    'Engineering Head, CFO',// attendees
-    'Y',                    // stay
-    'Marriott Pune',        // hotel
-    'VIP client',           // remarks
+    '2024-04-10',            // confirm_date
+    '2024-04-18',            // visit_date
+    '2024-04-19',            // visit_date_end  (leave blank for single-day)
+    PLANTS[0],               // plant  — matches your live plant list
+    'Tata Steel Ltd',        // company
+    'Mr. Suresh Patel',      // rep
+    CATEGORIES[0],           // category — matches your live category list
+    CRITS[2] || 'Medium',    // criticality
+    'New Order Discussion',  // focus
+    STATUSES[0],             // status — matches your live status list
+    'Rajesh Kumar',          // coordinator
+    'Engineering Head, CFO', // attendees
+    'Y',                     // stay (Y or N)
+    'Marriott Pune',         // hotel
+    'VIP client',            // remarks
     'Discuss Q2 supply requirements and annual pricing structure', // agenda
   ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+
+  // Add a helper comment row so users know valid values
+  const hint = [
+    'YYYY-MM-DD','YYYY-MM-DD','YYYY-MM-DD (optional)',
+    PLANTS.join(' | '),
+    '','',
+    CATEGORIES.join(' | '),
+    CRITS.join(' | '),
+    '',
+    STATUSES.join(' | '),
+    '','',
+    'Y or N','','',''
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+
   const csv = headers + '\n' + example + '\n';
   const a   = document.createElement('a');
   a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = 'plantvisit_bulk_upload_template.csv';
   a.click();
-  toast('Template Downloaded', `Fill in the CSV and upload it here. Valid statuses: ${STATUSES.join(', ')}`);
+  toast('Template Downloaded', `Valid statuses: ${STATUSES.join(', ')} · Plants: ${PLANTS.join(', ')}`);
 }
 
 </script>
