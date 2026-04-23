@@ -825,7 +825,7 @@ html.guest-direct-link #mainContent { display: block !important; }
   <button class="nav-btn" id="tab-records" onclick="showTab('records')">
     Visit Records <span class="nav-badge" id="recordsBadge">0</span>
   </button>
-  <button class="nav-btn" id="tab-new" onclick="showTab('new')">+ New Visit</button>
+  <button class="nav-btn" id="tab-new" onclick="showTab('new')" style="display:none">+ New Visit</button>
   <button class="nav-btn" id="tab-mail" onclick="showTab('mail')">
     Mail Log <span class="nav-badge" id="mailBadge">0</span>
   </button>
@@ -1000,6 +1000,7 @@ let _settingsData = {
   }
 };
 let _appReady   = false;
+let _guestDashboardPending = false; // true when guest opens dashboard link and data hasn't arrived yet
 let _pendingVisitId = null; // for direct-link navigation
 
 /* ══════════════════════════════════════════════════════════
@@ -1147,6 +1148,12 @@ function initFirestoreListeners() {
       } else { bootApp(); refreshActiveTab(); }
     } else {
       updateBadges();
+      if (_guestDashboardPending && currentUser) {
+        _guestDashboardPending = false;
+        const el = document.getElementById('mainContent');
+        if (el) { destroyCharts(); el.innerHTML = ''; renderDashboard(el); }
+        return;
+      }
       const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
       if (currentUser) showTab(activeTab);
     }
@@ -1324,6 +1331,15 @@ function bootApp() {
  */
 function refreshActiveTab() {
   if (!_appReady || !currentUser) return;
+  // If guest opened the dashboard link while data was still loading, force a
+  // full dashboard render now that Firestore data has arrived.
+  if (_guestDashboardPending) {
+    _guestDashboardPending = false;
+    const el = document.getElementById('mainContent');
+    if (el) { destroyCharts(); el.innerHTML = ''; renderDashboard(el); }
+    updateBadges();
+    return;
+  }
   const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
   updateBadges();
   showTab(activeTab);
@@ -1421,6 +1437,7 @@ function autoLoginGuest(visitId) {
     // refreshActiveTab() will re-render the real dashboard once Firestore data arrives.
     const mc = document.getElementById('mainContent');
     if (mc && _visitsData.length === 0) {
+      _guestDashboardPending = true;
       mc.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px">
         <div style="width:40px;height:40px;border:3px solid var(--gold-bdr);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite"></div>
         <div style="font-size:14px;color:var(--slate)">Loading dashboard…</div>
@@ -1572,6 +1589,10 @@ function getVisible() {
    TAB ROUTING
 ══════════════════════════════════════════════════════════ */
 function showTab(tab) {
+  // Guests may not access the New Visit form — redirect to dashboard
+  if (tab === 'new' && currentUser && currentUser.id === '__guest__') {
+    tab = 'dashboard';
+  }
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById('tab-'+tab);
   if (btn) btn.classList.add('active');
