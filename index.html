@@ -1148,7 +1148,7 @@ function initFirestoreListeners() {
     } else {
       updateBadges();
       const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
-      showTab(activeTab);
+      if (currentUser) showTab(activeTab);
     }
   }, err => { console.error(err); setFbStatus('error'); if (!_appReady) bootApp(); });
 
@@ -1309,7 +1309,10 @@ function bootApp() {
     document.body.classList.add('light');
     document.getElementById('themeBtn').textContent = '☀️';
   }
-  setTimeout(() => document.getElementById('pageLoader').classList.add('hidden'), 400);
+  setTimeout(() => {
+    document.getElementById('pageLoader').classList.add('hidden');
+    refreshActiveTab();
+  }, 400);
 }
 
 /**
@@ -1320,13 +1323,10 @@ function bootApp() {
  * zeroes because the data hadn't loaded yet when the tab first rendered.
  */
 function refreshActiveTab() {
-  if (!_appReady) return;
+  if (!_appReady || !currentUser) return;
   const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
-  // Only refresh if the app chrome is already visible (i.e. session is active)
-  if (document.getElementById('mainContent')?.style.display === 'block') {
-    updateBadges();
-    showTab(activeTab);
-  }
+  updateBadges();
+  showTab(activeTab);
 }
 
 /* ══════════════════════════════════════════════════════════
