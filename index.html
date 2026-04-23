@@ -1137,6 +1137,10 @@ function saveSettings() {
 function initFirestoreListeners() {
   if (_listenersStarted) return; // prevent double-init
   _listenersStarted = true;
+  // Register plants & categories listeners here (after auth) so guest direct-link
+  // users also get live plant/category data without a permission-denied error.
+  initPlantsListener();
+  initCategoriesListener();
   _loadLocalUsers();  // restore custom users + deletions from localStorage immediately
   db.collection(VISITS_COL).orderBy('createdAt','asc').onSnapshot(snapshot => {
     setFbStatus('live');
@@ -4429,8 +4433,8 @@ function deleteCategory(idx, name) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  initPlantsListener();
-  initCategoriesListener();
+  // NOTE: initPlantsListener() and initCategoriesListener() are called inside
+  // initFirestoreListeners() (after auth) so they work in all paths including guest.
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeModal();
