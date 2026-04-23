@@ -2146,7 +2146,13 @@ function buildTable(visits, actions) {
 function renderForm(el, data) {
   const d = data || { plant:currentUser.plant||'Pune', stay:'N', criticality:'Medium', category:'Business Development', status:'Scheduled' };
   const isEdit = !!data;
-  const plantDisabled = currentUser.access==='plant' ? 'disabled' : '';
+  // For plant users: show only their assigned plants.
+  // If they have exactly 1 plant → disable (auto-selected). If 2+ → enable so they can choose.
+  const userPlants    = currentUser.access === 'plant' ? getUserPlants(currentUser) : PLANTS;
+  const plantsToShow  = userPlants.length > 0 ? userPlants : PLANTS;
+  // Default selected plant: prefer the record's plant if in allowed list, else first allowed plant
+  const defaultPlant  = plantsToShow.includes(d.plant) ? d.plant : plantsToShow[0];
+  const plantDisabled = currentUser.access === 'plant' && plantsToShow.length <= 1 ? 'disabled' : '';
   el.innerHTML = `
   <div class="form-panel">
     <div class="form-panel-title">${isEdit?'Edit Visit Record':'New Customer Visit'}<span>${isEdit?'Updating · '+xe(d.company):'Entry Form'}</span></div>
@@ -2155,7 +2161,7 @@ function renderForm(el, data) {
       <div class="fg"><label>Confirmation Date <span class="req">*</span></label><input type="date" id="f_confirmDate" value="${d.confirmDate||''}"></div>
       <div class="fg"><label>Visit Date — From <span class="req">*</span></label><input type="date" id="f_visitDate" value="${d.visitDate||''}" onchange="validateVisitDateRange()"></div>
       <div class="fg"><label>Visit Date — To <span style="font-size:10px;color:var(--slate);font-weight:400">(optional, multi-day)</span></label><input type="date" id="f_visitDateEnd" value="${d.visitDateEnd||''}" onchange="validateVisitDateRange()"></div>
-      <div class="fg"><label>Plant <span class="req">*</span></label><select id="f_plant" ${plantDisabled}>${PLANTS.map(p=>`<option${d.plant===p?' selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="fg"><label>Plant <span class="req">*</span></label><select id="f_plant" ${plantDisabled}>${plantsToShow.map(p=>`<option${defaultPlant===p?' selected':''}>${p}</option>`).join('')}</select></div>
     </div>
     <div class="form-grid" style="margin-top:16px">
       <div class="form-section-label">Visitor Information</div>
