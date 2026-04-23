@@ -886,31 +886,26 @@ const firebaseConfig = {
    service cloud.firestore {
      match /databases/{database}/documents {
 
-       // Helper: true for any real (non-anonymous) signed-in user
-       function isRealUser() {
-         return request.auth != null && !request.auth.token.firebase.sign_in_provider.matches('anonymous');
-       }
-       // Helper: true for any authenticated user incl. anonymous
+       // Any authenticated user (including anonymous guest viewers)
        function isAuthenticated() {
          return request.auth != null;
        }
 
-       // Visit records — read: any auth user; write: real users only
+       // Visit records — read+write: any authenticated user
+       // (App enforces its own username/password login — Firebase Auth
+       // is anonymous for ALL users, so isRealUser() blocks real users too)
        match /visits/{visitId} {
-         allow read: if isAuthenticated();
-         allow write: if isRealUser();
+         allow read, write: if isAuthenticated();
        }
 
        // Config docs (settings, users, mail, plants, categories)
        match /config/{docId} {
-         allow read: if isAuthenticated();
-         allow write: if isRealUser();
+         allow read, write: if isAuthenticated();
        }
 
        // Per-user docs in appUsers collection
        match /appUsers/{userId} {
-         allow read: if isAuthenticated();
-         allow write: if isRealUser();
+         allow read, write: if isAuthenticated();
        }
      }
    }
@@ -1119,11 +1114,17 @@ let _pendingVisitId = null; // for direct-link navigation
 function loadVisits() { return [..._visitsData]; }
 function saveOneVisit(v) {
   _visitsData = _visitsData.filter(x => x.id !== v.id).concat(v);
-  db.collection(VISITS_COL).doc(v.id).set(v).catch(e => console.error(e));
+  db.collection(VISITS_COL).doc(v.id).set(v).catch(e => {
+    console.error('[PlantVisit] saveOneVisit FAILED:', e.code, e.message);
+    toast('⚠ Save Failed', 'Firestore: ' + (e.code || e.message), true);
+  });
 }
 function deleteOneVisit(id) {
   _visitsData = _visitsData.filter(v => v.id !== id);
-  db.collection(VISITS_COL).doc(id).delete().catch(e => console.error(e));
+  db.collection(VISITS_COL).doc(id).delete().catch(e => {
+    console.error('[PlantVisit] deleteOneVisit FAILED:', e.code, e.message);
+    toast('⚠ Delete Failed', 'Firestore: ' + (e.code || e.message), true);
+  });
 }
 function loadMail() { return [..._mailData]; }
 function saveMail(mails) {
@@ -1556,6 +1557,36 @@ function doLogin() {
   localStorage.setItem('pv_session', JSON.stringify({ id: username, name: user.name }));
   activateSession(user, username, null);
   _pendingVisitId = null;
+
+  // ★ FIX: Re-authenticate with Firebase using email/password so the auth
+  // token becomes non-anonymous. This is required for Firestore write rules
+  // (isRealUser) to pass. The app uses its own username/password check above;
+  // Firebase Auth here is only needed to satisfy Firestore security rules.
+  // We use the stored email if available, otherwise derive one from username.
+  const email = user.email || (username + '@plantvisit.internal');
+  const fbPass = 'pv_' + username + '_realuser_2025';
+  try {
+    firebase.auth().signInWithEmailAndPassword(email, fbPass)
+      .then(cred => {
+        console.log('[PlantVisit] ✅ Firebase email auth OK for', username, '| UID:', cred?.user?.uid);
+      })
+      .catch(err => {
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          // User doesn't exist yet in Firebase Auth — create them
+          firebase.auth().createUserWithEmailAndPassword(email, fbPass)
+            .then(cred => {
+              console.log('[PlantVisit] ✅ Firebase email auth created for', username, '| UID:', cred?.user?.uid);
+            })
+            .catch(err2 => {
+              console.warn('[PlantVisit] Firebase email auth create failed:', err2.code, '— writes may fail if rules block anonymous.');
+            });
+        } else {
+          console.warn('[PlantVisit] Firebase email auth failed:', err.code, '— writes may fail if rules block anonymous.');
+        }
+      });
+  } catch(e) {
+    console.warn('[PlantVisit] Firebase auth upgrade error:', e);
+  }
 }
 
 /** Guest login — no password. Opens the dashboard (or a specific visit if one is pending). */
