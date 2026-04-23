@@ -889,6 +889,7 @@ let _fbStatus = 'connecting'; // 'connecting' | 'live' | 'error'
 let _fbLastSync = null;
 let _fbListenerCount = 0;
 let _fbSyncTimer = null;
+let _listenersStarted = false; // guard: prevent double-init of Firestore listeners
 
 function setFbStatus(state, detail) {
   _fbStatus = state;
@@ -1134,6 +1135,8 @@ function saveSettings() {
 }
 
 function initFirestoreListeners() {
+  if (_listenersStarted) return; // prevent double-init
+  _listenersStarted = true;
   _loadLocalUsers();  // restore custom users + deletions from localStorage immediately
   db.collection(VISITS_COL).orderBy('createdAt','asc').onSnapshot(snapshot => {
     setFbStatus('live');
@@ -1469,6 +1472,24 @@ function doLogin() {
 function doGuestLogin() {
   autoLoginGuest(_pendingVisitId || null);
   _pendingVisitId = null;
+  // If Firebase listeners haven't been started yet (e.g. anonymous auth is still
+  // in-flight or was never triggered on this path), kick them off now so the
+  // status pill turns live instead of staying grey "Connecting…".
+  if (!_listenersStarted) {
+    try {
+      firebase.auth().signInAnonymously()
+        .then((userCred) => {
+          console.log('[PlantVisit] ✅ Anonymous auth OK (guest login). UID:', userCred?.user?.uid);
+          initFirestoreListeners();
+        })
+        .catch(err => {
+          console.error('[PlantVisit] ❌ Anonymous auth FAILED (guest login):', err.code, err.message);
+          try { initFirestoreListeners(); } catch(e2) { console.warn('Firestore listener error:', e2); }
+        });
+    } catch(e) {
+      console.warn('Firebase init error (guest login):', e);
+    }
+  }
 }
 
 function doLogout() {
