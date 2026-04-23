@@ -867,6 +867,54 @@ const firebaseConfig = {
   appId:             "1:1011690659933:web:f57e43ee0267a475682db4",
   measurementId:     "G-67NGHMK0QR"
 };
+
+/* ══════════════════════════════════════════════════════════
+   REQUIRED FIREBASE FIRESTORE SECURITY RULES
+   ──────────────────────────────────────────────────────────
+   Deploy these rules in Firebase Console → Firestore →
+   Rules tab, or via "firebase deploy --only firestore:rules"
+
+   KEY FIX: Guest Viewer / Direct-Link emails use
+   signInAnonymously(). The rules below allow ANY authenticated
+   user (including anonymous) to READ visits and config, but
+   WRITE only if the user is NOT anonymous. This means:
+     • Email digest direct links open the full dashboard ✓
+     • Data is still protected from unauthenticated access ✓
+     • Only real (non-anonymous) signed-in users can mutate ✓
+
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+
+       // Helper: true for any real (non-anonymous) signed-in user
+       function isRealUser() {
+         return request.auth != null && !request.auth.token.firebase.sign_in_provider.matches('anonymous');
+       }
+       // Helper: true for any authenticated user incl. anonymous
+       function isAuthenticated() {
+         return request.auth != null;
+       }
+
+       // Visit records — read: any auth user; write: real users only
+       match /visits/{visitId} {
+         allow read: if isAuthenticated();
+         allow write: if isRealUser();
+       }
+
+       // Config docs (settings, users, mail, plants, categories)
+       match /config/{docId} {
+         allow read: if isAuthenticated();
+         allow write: if isRealUser();
+       }
+
+       // Per-user docs in appUsers collection
+       match /appUsers/{userId} {
+         allow read: if isAuthenticated();
+         allow write: if isRealUser();
+       }
+     }
+   }
+══════════════════════════════════════════════════════════ */
 // Null-safe Firestore stub used when Firebase is unavailable
 const _nullDoc = { set:()=>Promise.resolve(), delete:()=>Promise.resolve(), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({exists:false,data:()=>({}),docs:[]}),0); return ()=>{};}, get:()=>Promise.resolve({exists:false,data:()=>({})}) };
 const _nullCol = { doc:()=>_nullDoc, orderBy:()=>({onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({docs:[]}),0); return ()=>{}; }}), onSnapshot:(cb,eb)=>{if(typeof cb==='function')setTimeout(()=>cb({docs:[]}),0); return ()=>{}; }, add:()=>Promise.resolve(_nullDoc), limit:()=>({get:()=>Promise.resolve({docs:[]})}) };
@@ -1006,6 +1054,9 @@ let _pendingVisitId = null; // for direct-link navigation
 
 /* ══════════════════════════════════════════════════════════
    URL PARAMS — direct link access (no-login guest entry)
+   FIX: Set _guestDashboardPending BEFORE auth so the
+   snapshot callback always sees it as true and re-renders
+   the dashboard once real data arrives.
 ══════════════════════════════════════════════════════════ */
 (function checkDirectLink() {
   const params  = new URLSearchParams(window.location.search);
@@ -1013,26 +1064,51 @@ let _pendingVisitId = null; // for direct-link navigation
   const isGuest = params.get('guest');
   if (!visitId && !isGuest) return;
   if (visitId) _pendingVisitId = visitId;
+
+  // ★ FIX: Mark dashboard as pending NOW (before DOMContentLoaded)
+  // so the Firestore snapshot always triggers a re-render.
+  if (!visitId && isGuest) {
+    _guestDashboardPending = true;
+  }
+
   // CSS has already hidden loginScreen — hide loader immediately too
   document.addEventListener('DOMContentLoaded', () => {
     // Hide page loader right away — no 800ms delay for direct links
     const pl = document.getElementById('pageLoader');
     if (pl) pl.classList.add('hidden');
-    // Activate guest session immediately (shows app chrome, spinner inside content)
+
+    // Activate guest session immediately (shows spinner inside content)
     autoLoginGuest(visitId || null);
-    // Then boot Firestore so data arrives and populates the view
+
+    // Boot Firestore — anonymous auth required to satisfy security rules
+    // FIX: Use onAuthStateChanged so we don't double-init if auth resolves
+    // before or after DOMContentLoaded fires.
     try {
-      firebase.auth().signInAnonymously()
-        .then((userCred) => {
-          console.log('[PlantVisit] ✅ Anonymous auth OK (direct link). UID:', userCred?.user?.uid);
+      const unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+        unsubscribe(); // only handle once
+        if (user) {
+          console.log('[PlantVisit] ✅ Auth state resolved (direct link). UID:', user.uid);
           initFirestoreListeners();
-        })
-        .catch(err => {
-          console.error('[PlantVisit] ❌ Anonymous auth FAILED (direct link):', err.code, err.message);
-          try { initFirestoreListeners(); } catch(e2) {}
-        });
+        } else {
+          // Not signed in yet — sign in anonymously
+          firebase.auth().signInAnonymously()
+            .then((userCred) => {
+              console.log('[PlantVisit] ✅ Anonymous auth OK (direct link). UID:', userCred?.user?.uid);
+              initFirestoreListeners();
+            })
+            .catch(err => {
+              console.error('[PlantVisit] ❌ Anonymous auth FAILED (direct link):', err.code, err.message);
+              // Fall back to listener without auth (works if Firestore rules allow public reads)
+              try { initFirestoreListeners(); } catch(e2) {
+                console.warn('Firestore listener fallback error:', e2);
+              }
+            });
+        }
+      });
     } catch(e) {
       console.warn('Firebase init error (direct link):', e);
+      // Last-resort fallback
+      try { initFirestoreListeners(); } catch(e2) {}
     }
   });
 })();
@@ -1155,6 +1231,10 @@ function initFirestoreListeners() {
       } else { bootApp(); refreshActiveTab(); }
     } else {
       updateBadges();
+      // ★ FIX: Always honour _guestDashboardPending regardless of data length.
+      // Previously this only fired when _visitsData was empty, so if Firestore
+      // returned records on the very first snapshot the dashboard was never
+      // re-rendered and showed all-zero metrics.
       if (_guestDashboardPending && currentUser) {
         _guestDashboardPending = false;
         const el = document.getElementById('mainContent');
@@ -1325,6 +1405,8 @@ function bootApp() {
   }
   setTimeout(() => {
     document.getElementById('pageLoader').classList.add('hidden');
+    // ★ FIX: refreshActiveTab checks _guestDashboardPending and re-renders
+    // the dashboard if the guest direct-link has already activated a session.
     refreshActiveTab();
   }, 400);
 }
@@ -1406,6 +1488,10 @@ function activateSession(user, id, visitId) {
  * Called when the page is opened via a notification email link (?visit=…).
  * Bypasses the login screen and opens the app as a read-only viewer,
  * jumping straight to the visit record. Waits for Firestore data if needed.
+ *
+ * FIX: _guestDashboardPending is always set true for ?guest=1 links
+ * (even if _visitsData already has seed data) so the real Firestore
+ * snapshot always triggers a fresh dashboard render.
  */
 function autoLoginGuest(visitId) {
   const GUEST = {
@@ -1439,11 +1525,11 @@ function autoLoginGuest(visitId) {
     };
     tryOpen(20);
   } else {
-    // Dashboard link (?guest=1) — data hasn't loaded yet so activateSession rendered
-    // with empty _visitsData showing all-zero metrics. Replace with a spinner now;
-    // refreshActiveTab() will re-render the real dashboard once Firestore data arrives.
+    // Dashboard link (?guest=1) — always show spinner and mark pending.
+    // The Firestore snapshot (initFirestoreListeners) will re-render once
+    // real data arrives, even if SEED_DATA was already injected.
     const mc = document.getElementById('mainContent');
-    if (mc && _visitsData.length === 0) {
+    if (mc) {
       _guestDashboardPending = true;
       mc.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px">
         <div style="width:40px;height:40px;border:3px solid var(--gold-bdr);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite"></div>
