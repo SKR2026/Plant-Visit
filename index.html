@@ -1704,6 +1704,139 @@ function destroyCharts() {
   Object.values(chartReg).forEach(c => { try { c.destroy(); } catch(e){} });
   chartReg = {};
 }
+/* ══════════════════════════════════════════════════════════
+   NOTIFICATION BELL
+   In-app notification system for admin/management users.
+   Tracks new/updated visits since last login.
+══════════════════════════════════════════════════════════ */
+let _notifs = [];       // { id, text, time, read, visitId }
+let _notifPanelOpen = false;
+
+function initNotifBell() {
+  const btn  = document.getElementById('notifBellBtn');
+  const wrap = document.getElementById('notifBellWrap');
+  if (!btn || !wrap) return;
+
+  // Only show bell for admin and management (not plant users, not guests)
+  const show = currentUser && (currentUser.access === 'admin' || currentUser.access === 'management');
+  btn.style.display = show ? 'flex' : 'none';
+
+  if (!show) return;
+
+  // Load persisted notifications from localStorage
+  try {
+    const saved = localStorage.getItem('pv_notifs_' + currentUser.id);
+    _notifs = saved ? JSON.parse(saved) : [];
+  } catch(e) { _notifs = []; }
+
+  _renderNotifBell();
+
+  // Close panel when clicking outside
+  document.addEventListener('click', _notifOutsideClick, { capture: true });
+}
+
+function _notifOutsideClick(e) {
+  const wrap = document.getElementById('notifBellWrap');
+  if (wrap && !wrap.contains(e.target) && _notifPanelOpen) {
+    _closeNotifPanel();
+  }
+}
+
+function toggleNotifPanel() {
+  if (_notifPanelOpen) {
+    _closeNotifPanel();
+  } else {
+    _openNotifPanel();
+  }
+}
+
+function _openNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (panel) panel.classList.add('open');
+  _notifPanelOpen = true;
+  _renderNotifList();
+}
+
+function _closeNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (panel) panel.classList.remove('open');
+  _notifPanelOpen = false;
+  // Mark all as read when closing
+  _notifs.forEach(n => { n.read = true; });
+  _saveNotifs();
+  _renderNotifBell();
+}
+
+function _renderNotifBell() {
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  const unread = _notifs.filter(n => !n.read).length;
+  badge.textContent = unread;
+  badge.style.display = unread > 0 ? 'flex' : 'none';
+}
+
+function _renderNotifList() {
+  const list = document.getElementById('notifList');
+  if (!list) return;
+  if (!_notifs.length) {
+    list.innerHTML = '<div class="notif-empty">No notifications yet</div>';
+    return;
+  }
+  list.innerHTML = [..._notifs].reverse().map(n => `
+    <div class="notif-item${n.read ? '' : ' notif-unread'}" onclick="_notifClick('${n.visitId||''}')">
+      <div class="notif-text">${xe(n.text)}</div>
+      <div class="notif-time">${n.time}</div>
+    </div>`).join('');
+}
+
+function _notifClick(visitId) {
+  _closeNotifPanel();
+  if (visitId) {
+    showTab('records');
+    setTimeout(() => openView(visitId), 80);
+  }
+}
+
+function markAllNotifsRead() {
+  _notifs.forEach(n => { n.read = true; });
+  _saveNotifs();
+  _renderNotifBell();
+  _renderNotifList();
+}
+
+function clearAllNotifs() {
+  _notifs = [];
+  _saveNotifs();
+  _renderNotifBell();
+  _renderNotifList();
+}
+
+function _saveNotifs() {
+  if (!currentUser) return;
+  try {
+    // Keep only last 50
+    if (_notifs.length > 50) _notifs = _notifs.slice(-50);
+    localStorage.setItem('pv_notifs_' + currentUser.id, JSON.stringify(_notifs));
+  } catch(e) {}
+}
+
+/**
+ * addNotif(text, visitId)
+ * Called by logMail / saveVisit to push a new notification.
+ * Only adds if current user is admin or management.
+ */
+function addNotif(text, visitId) {
+  if (!currentUser) return;
+  if (currentUser.access !== 'admin' && currentUser.access !== 'management') return;
+  const now = new Date();
+  const time = now.toLocaleDateString('en-IN', {day:'2-digit',month:'short'}) + ' ' +
+               now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  _notifs.push({ id: 'n' + Date.now(), text, time, read: false, visitId: visitId || '' });
+  _saveNotifs();
+  _renderNotifBell();
+  if (_notifPanelOpen) _renderNotifList();
+}
+
 function updateBadges() {
   document.getElementById('recordsBadge').textContent = getVisible().length;
   document.getElementById('mailBadge').textContent    = loadMail().length;
@@ -2121,6 +2254,7 @@ function saveVisit(editId) {
     saveOneVisit(data);
   }
   logMail(data, isEdit);
+  addNotif((isEdit ? '✏ Updated: ' : '✦ New visit: ') + data.company + ' — ' + (data.visitDate||''), data.id);
   updateBadges();
   toast(isEdit?'✓ Record Updated':'✦ Visit Saved', `${data.company} — mail notification logged`);
   closeModal();
