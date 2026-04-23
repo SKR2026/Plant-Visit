@@ -1740,7 +1740,7 @@ function renderDashboard(el) {
     <div class="table-wrap">${buildTable(visits.slice(0,5), false)}</div>
   </div>`;
 
-  setTimeout(() => {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     updateFbBanner(); // sync banner to current Firebase status
     const catColors = ['#e8c547','#4a90e2','#5abf7a','#e05555','#e08540','#9b59b6','#16a085','#e74c3c'];
     const critColors = { Critical:'#e05555', High:'#e08540', Medium:'#4a90e2', Low:'#5abf7a' };
@@ -1780,7 +1780,7 @@ function renderDashboard(el) {
         options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:tc},grid:{display:false}}, y:{ticks:{color:tc,stepSize:1},grid:{color:gc}} } }
       });
     }
-  }, 60);
+  }));
 }
 
 function buildLegend(id, keys, colors, vals=[]) {
