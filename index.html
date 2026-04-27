@@ -52,7 +52,13 @@
   --font-display:'DM Serif Display', Georgia, serif;
   --font:'DM Sans', 'Segoe UI', sans-serif;
 }
-body.light {
+
+/* ══════════════════════════════════════════════════════════
+   MULTI-COLOUR THEMES  (apply via body class)
+══════════════════════════════════════════════════════════ */
+
+/* Theme: Light / Classic */
+body.theme-light, body.light {
   --navy:#eef4fb;--navy2:#deeaf6;--navy3:#cde0f0;--navy4:#b8d3e8;--navy5:#a0c3dc;
   --gold:#b8860b;--gold2:#d4a017;--gold-dim:#8a6408;
   --gold-bg:rgba(184,134,11,0.08);--gold-bdr:rgba(184,134,11,0.20);
@@ -61,6 +67,78 @@ body.light {
   --red:#c0392b;--red-bg:rgba(192,57,43,0.09);--orange:#d35400;--orange-bg:rgba(211,84,0,0.09);
   --blue:#2471a3;--blue-bg:rgba(36,113,163,0.09);--green:#1e8449;--green-bg:rgba(30,132,73,0.09);
   --purple:#6c3fc0;--purple-bg:rgba(108,63,192,0.09);--shadow:0 4px 20px rgba(0,0,0,0.10);
+}
+
+/* Theme: Emerald Forest */
+body.theme-emerald {
+  --navy:#0a1a0f;--navy2:#0f2318;--navy3:#162e20;--navy4:#1e3a29;--navy5:#254733;
+  --gold:#4ecb71;--gold2:#6ee68e;--gold-dim:#2e8a4a;
+  --gold-bg:rgba(78,203,113,0.10);--gold-bdr:rgba(78,203,113,0.22);
+  --slate:#6a9a78;--slate2:#90bb9e;--white:#e8f5ec;--white2:#c0dfc9;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --red:#e05555;--red-bg:rgba(224,85,85,0.12);--orange:#e09540;--orange-bg:rgba(224,149,64,0.12);
+  --blue:#4ab8e2;--blue-bg:rgba(74,184,226,0.12);--green:#4ecb71;--green-bg:rgba(78,203,113,0.12);
+  --purple:#9b72e8;--purple-bg:rgba(155,114,232,0.12);--shadow:0 4px 24px rgba(0,0,0,0.45);
+}
+
+/* Theme: Ocean Depth */
+body.theme-ocean {
+  --navy:#050d1f;--navy2:#0b1530;--navy3:#101e40;--navy4:#172850;--navy5:#1f3362;
+  --gold:#5ba3f5;--gold2:#7ab8ff;--gold-dim:#3a78c9;
+  --gold-bg:rgba(91,163,245,0.10);--gold-bdr:rgba(91,163,245,0.22);
+  --slate:#6888b8;--slate2:#90a8d8;--white:#dce8ff;--white2:#b0c8f0;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --red:#e05570;--red-bg:rgba(224,85,112,0.12);--orange:#e09540;--orange-bg:rgba(224,149,64,0.12);
+  --blue:#5ba3f5;--blue-bg:rgba(91,163,245,0.12);--green:#4ecb90;--green-bg:rgba(78,203,144,0.12);
+  --purple:#a872e8;--purple-bg:rgba(168,114,232,0.12);--shadow:0 4px 24px rgba(0,0,0,0.50);
+}
+
+/* Theme: Rose Quartz */
+body.theme-rose {
+  --navy:#1a0a14;--navy2:#240f1c;--navy3:#301525;--navy4:#3c1c2f;--navy5:#48233a;
+  --gold:#e86ba0;--gold2:#f088b8;--gold-dim:#a84070;
+  --gold-bg:rgba(232,107,160,0.10);--gold-bdr:rgba(232,107,160,0.22);
+  --slate:#a87090;--slate2:#c898b0;--white:#f5e8ef;--white2:#dfc0d0;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --red:#e05555;--red-bg:rgba(224,85,85,0.12);--orange:#e08540;--orange-bg:rgba(224,133,64,0.12);
+  --blue:#7090e8;--blue-bg:rgba(112,144,232,0.12);--green:#5abf7a;--green-bg:rgba(90,191,122,0.12);
+  --purple:#e86ba0;--purple-bg:rgba(232,107,160,0.12);--shadow:0 4px 24px rgba(0,0,0,0.45);
+}
+
+/* Theme: Amber Dusk */
+body.theme-amber {
+  --navy:#1a100a;--navy2:#251710;--navy3:#322018;--navy4:#3e2a20;--navy5:#4b3428;
+  --gold:#f0a030;--gold2:#f8b84e;--gold-dim:#b07020;
+  --gold-bg:rgba(240,160,48,0.10);--gold-bdr:rgba(240,160,48,0.22);
+  --slate:#a88060;--slate2:#c8a080;--white:#f5ece0;--white2:#dfd0b8;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --red:#e05555;--red-bg:rgba(224,85,85,0.12);--orange:#f0a030;--orange-bg:rgba(240,160,48,0.12);
+  --blue:#60a8e0;--blue-bg:rgba(96,168,224,0.12);--green:#5abf7a;--green-bg:rgba(90,191,122,0.12);
+  --purple:#b880e8;--purple-bg:rgba(184,128,232,0.12);--shadow:0 4px 24px rgba(0,0,0,0.45);
+}
+
+/* Theme: Arctic (Light blue) */
+body.theme-arctic {
+  --navy:#f0f4f8;--navy2:#e2eaf2;--navy3:#d0dcea;--navy4:#bccde0;--navy5:#a6bed4;
+  --gold:#1a56a0;--gold2:#2468be;--gold-dim:#0e3870;
+  --gold-bg:rgba(26,86,160,0.07);--gold-bdr:rgba(26,86,160,0.18);
+  --slate:#4a6080;--slate2:#2a4060;--white:#0f1e30;--white2:#2a3e58;
+  --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.15);
+  --red:#c0392b;--red-bg:rgba(192,57,43,0.09);--orange:#d35400;--orange-bg:rgba(211,84,0,0.09);
+  --blue:#1a56a0;--blue-bg:rgba(26,86,160,0.08);--green:#1e8449;--green-bg:rgba(30,132,73,0.09);
+  --purple:#6c3fc0;--purple-bg:rgba(108,63,192,0.09);--shadow:0 4px 20px rgba(0,0,0,0.12);
+}
+
+/* Theme: Violet Dusk */
+body.theme-violet {
+  --navy:#0e0a1a;--navy2:#160f28;--navy3:#1e1635;--navy4:#271e44;--navy5:#302654;
+  --gold:#b880ff;--gold2:#cc99ff;--gold-dim:#8050cc;
+  --gold-bg:rgba(184,128,255,0.10);--gold-bdr:rgba(184,128,255,0.22);
+  --slate:#8068a8;--slate2:#a088c8;--white:#ece8ff;--white2:#ccc0f0;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --red:#e05580;--red-bg:rgba(224,85,128,0.12);--orange:#e09040;--orange-bg:rgba(224,144,64,0.12);
+  --blue:#70a8f5;--blue-bg:rgba(112,168,245,0.12);--green:#60cf88;--green-bg:rgba(96,207,136,0.12);
+  --purple:#b880ff;--purple-bg:rgba(184,128,255,0.12);--shadow:0 4px 24px rgba(0,0,0,0.50);
 }
 
 /* ─── LOGO TRANSPARENCY ─────────────────────────────── */
@@ -202,6 +280,43 @@ body{background:var(--navy);color:var(--white);font-family:var(--font);font-size
   font-size:16px;transition:all .2s;
 }
 .theme-toggle:hover{border-color:var(--gold-bdr);color:var(--gold)}
+
+/* ─── THEME PICKER ────────────────────────────────────── */
+.theme-picker-wrap {position:relative}
+.theme-picker-btn {
+  width:36px;height:36px;border-radius:var(--radius);
+  background:var(--navy3);border:1px solid var(--border);
+  color:var(--slate2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;transition:all .2s;
+}
+.theme-picker-btn:hover{border-color:var(--gold-bdr);color:var(--gold)}
+.theme-palette-panel {
+  position:absolute;top:calc(100% + 8px);right:0;
+  background:var(--navy2);border:1px solid var(--border2);
+  border-radius:var(--radius-lg);padding:12px;
+  box-shadow:var(--shadow);z-index:250;display:none;
+  animation:slideDown .15s ease;min-width:240px;
+}
+.theme-palette-panel.open{display:block}
+.theme-palette-title{font-size:10px;font-weight:600;color:var(--slate);
+  text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;padding:0 2px}
+.theme-swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.theme-swatch {
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  cursor:pointer;padding:6px 4px;border-radius:var(--radius);
+  border:1px solid transparent;transition:all .15s;
+}
+.theme-swatch:hover{background:var(--navy3);border-color:var(--border2)}
+.theme-swatch.active{background:var(--gold-bg);border-color:var(--gold-bdr)}
+.theme-swatch-dot {
+  width:28px;height:28px;border-radius:50%;
+  border:2px solid rgba(255,255,255,0.15);
+  flex-shrink:0;transition:transform .15s;
+}
+.theme-swatch:hover .theme-swatch-dot,.theme-swatch.active .theme-swatch-dot{transform:scale(1.12)}
+.theme-swatch-label{font-size:9px;color:var(--slate2);text-align:center;letter-spacing:.2px;line-height:1.2}
+.theme-swatch.active .theme-swatch-label{color:var(--gold)}
 
 /* ─── FIREBASE STATUS INDICATOR ─────────────────────────── */
 .fb-status {
@@ -812,7 +927,47 @@ html.guest-direct-link #mainContent { display: block !important; }
       <div class="notif-footer">Only admins see notifications</div>
     </div>
   </div>
-  <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
+  <!-- THEME PICKER -->
+  <div class="theme-picker-wrap" id="themePickerWrap">
+    <button class="theme-picker-btn" id="themePickerBtn" onclick="toggleThemePicker()" title="Change colour theme">🎨</button>
+    <div class="theme-palette-panel" id="themePalettePanel">
+      <div class="theme-palette-title">Choose Theme</div>
+      <div class="theme-swatches" id="themeSwatches">
+        <div class="theme-swatch" data-theme="dark" onclick="applyTheme('dark')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#2e2e52,#0f0f1a);box-shadow:inset 0 0 0 1px rgba(232,197,71,.3)"></div>
+          <div class="theme-swatch-label">Midnight Gold</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-light" onclick="applyTheme('theme-light')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#deeaf6,#eef4fb);box-shadow:inset 0 0 0 1px rgba(184,134,11,.3)"></div>
+          <div class="theme-swatch-label">Classic Light</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-emerald" onclick="applyTheme('theme-emerald')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#254733,#0a1a0f);box-shadow:inset 0 0 0 1px rgba(78,203,113,.4)"></div>
+          <div class="theme-swatch-label">Emerald Forest</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-ocean" onclick="applyTheme('theme-ocean')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#1f3362,#050d1f);box-shadow:inset 0 0 0 1px rgba(91,163,245,.4)"></div>
+          <div class="theme-swatch-label">Ocean Depth</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-rose" onclick="applyTheme('theme-rose')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#48233a,#1a0a14);box-shadow:inset 0 0 0 1px rgba(232,107,160,.4)"></div>
+          <div class="theme-swatch-label">Rose Quartz</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-amber" onclick="applyTheme('theme-amber')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#4b3428,#1a100a);box-shadow:inset 0 0 0 1px rgba(240,160,48,.4)"></div>
+          <div class="theme-swatch-label">Amber Dusk</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-arctic" onclick="applyTheme('theme-arctic')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#e2eaf2,#f0f4f8);box-shadow:inset 0 0 0 1px rgba(26,86,160,.3)"></div>
+          <div class="theme-swatch-label">Arctic Blue</div>
+        </div>
+        <div class="theme-swatch" data-theme="theme-violet" onclick="applyTheme('theme-violet')">
+          <div class="theme-swatch-dot" style="background:radial-gradient(circle at 40% 40%,#302654,#0e0a1a);box-shadow:inset 0 0 0 1px rgba(184,128,255,.4)"></div>
+          <div class="theme-swatch-label">Violet Dusk</div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="fb-status connecting" id="fbStatusPill" title="Firebase Firestore connection status">
     <div class="fb-status-dot"></div>
     <span id="fbStatusLabel">Connecting…</span>
@@ -1399,11 +1554,18 @@ function initFirestoreListeners() {
 
 function bootApp() {
   _appReady = true;
-  if (localStorage.getItem('pv_theme') === 'light') {
-    darkMode = true;
-    document.body.classList.add('light');
-    document.getElementById('themeBtn').textContent = '☀️';
+  // Restore saved theme
+  const _savedTheme = localStorage.getItem('pv_theme') || 'dark';
+  _currentTheme = _savedTheme;
+  if (_savedTheme === 'theme-light' || _savedTheme === 'light') {
+    document.body.classList.add('light', 'theme-light');
+  } else if (_savedTheme !== 'dark') {
+    document.body.classList.add(_savedTheme);
   }
+  // Mark active swatch
+  document.querySelectorAll('.theme-swatch').forEach(sw => {
+    sw.classList.toggle('active', sw.dataset.theme === _savedTheme);
+  });
   setTimeout(() => {
     document.getElementById('pageLoader').classList.add('hidden');
     // ★ FIX: refreshActiveTab checks _guestDashboardPending and re-renders
@@ -1689,17 +1851,49 @@ function savePassword() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   THEME
+   MULTI-THEME SYSTEM
 ══════════════════════════════════════════════════════════ */
-function toggleTheme() {
-  darkMode = !darkMode;
-  document.body.classList.toggle('light', darkMode);
-  document.getElementById('themeBtn').textContent = darkMode ? '☀️' : '🌙';
-  localStorage.setItem('pv_theme', darkMode ? 'light' : 'dark');
+const THEMES = ['dark','theme-light','theme-emerald','theme-ocean','theme-rose','theme-amber','theme-arctic','theme-violet'];
+let _currentTheme = 'dark';
+
+function applyTheme(theme) {
+  _currentTheme = theme;
+  // Remove all theme classes
+  document.body.classList.remove('light', 'theme-light', 'theme-emerald', 'theme-ocean',
+    'theme-rose', 'theme-amber', 'theme-arctic', 'theme-violet');
+  // Apply selected theme
+  if (theme === 'theme-light') {
+    document.body.classList.add('light', 'theme-light');
+  } else if (theme !== 'dark') {
+    document.body.classList.add(theme);
+  }
+  // Update active swatch highlight
+  document.querySelectorAll('.theme-swatch').forEach(sw => {
+    sw.classList.toggle('active', sw.dataset.theme === theme);
+  });
+  localStorage.setItem('pv_theme', theme);
+  closethemePicker();
   destroyCharts();
   const activeTab = document.querySelector('.nav-btn.active')?.id?.replace('tab-','') || 'dashboard';
   showTab(activeTab);
 }
+
+function toggleThemePicker() {
+  const panel = document.getElementById('themePalettePanel');
+  if (panel) panel.classList.toggle('open');
+}
+function closethemePicker() {
+  const panel = document.getElementById('themePalettePanel');
+  if (panel) panel.classList.remove('open');
+}
+// Close picker on outside click
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('themePickerWrap');
+  if (wrap && !wrap.contains(e.target)) closethemePicker();
+});
+
+// Legacy toggle: cycle between dark and light
+function toggleTheme() { applyTheme(_currentTheme === 'dark' ? 'theme-light' : 'dark'); }
 function destroyCharts() {
   Object.values(chartReg).forEach(c => { try { c.destroy(); } catch(e){} });
   chartReg = {};
@@ -4701,10 +4895,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Restore theme before login
-  if (localStorage.getItem('pv_theme') === 'light') {
-    darkMode = true;
-    document.body.classList.add('light');
-    document.getElementById('themeBtn').textContent = '☀️';
+  // Restore saved theme on login
+  const _lsTheme = localStorage.getItem('pv_theme') || 'dark';
+  _currentTheme = _lsTheme;
+  if (_lsTheme === 'theme-light' || _lsTheme === 'light') {
+    document.body.classList.add('light', 'theme-light');
+  } else if (_lsTheme !== 'dark') {
+    document.body.classList.add(_lsTheme);
   }
 
   // If this is a direct link (?visit=...&guest=1), the checkDirectLink() IIFE
