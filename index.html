@@ -1457,7 +1457,11 @@ function initFirestoreListeners() {
   db.collection(VISITS_COL).orderBy('createdAt','asc').onSnapshot(snapshot => {
     setFbStatus('live');
     startSyncClock();
-    _visitsData = snapshot.docs.map(d => d.data());
+    _visitsData = snapshot.docs.map(d => {
+      const v = d.data();
+      if (v.status === 'Confirmed') v.status = 'Scheduled';
+      return v;
+    });
     if (!_appReady) {
       if (_visitsData.length === 0) {
         const _ls = document.getElementById('loaderStatus'); if (_ls) _ls.textContent = 'Seeding sample data…';
@@ -5276,7 +5280,7 @@ function _parseAndValidateCSV(raw) {
     const critVal      = critMatch || 'Medium';
 
     const statusRaw    = g('status');
-    const statusResolved = statusRaw || 'Scheduled';
+    const statusResolved = (statusRaw === 'Confirmed' ? 'Scheduled' : statusRaw) || 'Scheduled';
     const statusMatch  = matchList(STATUSES, statusResolved);
     const statusVal    = statusMatch || 'Scheduled';
 
