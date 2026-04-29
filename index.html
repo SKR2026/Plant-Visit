@@ -1227,7 +1227,7 @@ function startSyncClock() {
 let PLANTS     = ['Pune','Chennai','Ahmedabad'];
 let CATEGORIES = ['Business Development','Technical Review','Customer Complaint','Partnership','Training','Compliance','After Sales','Audit'];
 const CRITS      = ['Critical','High','Medium','Low'];
-const STATUSES   = ['Scheduled','Confirmed','Completed','Cancelled'];
+const STATUSES   = ['Scheduled','Completed','Cancelled'];
 
 const DEFAULT_USERS = {
   admin:     { name:'Admin User',    initials:'AU', role:'Administrator',  access:'admin',      plant:null,      plants:null,               password:'admin123',   email:'admin@company.com' },
@@ -1239,8 +1239,8 @@ const DEFAULT_USERS = {
 };
 
 const SEED_DATA = [
-  { id:'v1', confirmDate:'2024-03-10', visitDate:'2024-03-18', plant:'Pune',      company:'Tata Steel Ltd',        rep:'Mr. Suresh Patel',      category:'Business Development', criticality:'High',     focus:'New Order',          agenda:'Discuss Q2 supply chain requirements and annual pricing structure',  coordinator:'Rajesh Kumar',  attendees:'Rajesh Kumar, Vivek Singh, CFO',          stay:'Y', hotel:'Marriott Pune',       remarks:'VIP client — ensure boardroom availability', status:'Confirmed',  createdAt:'2024-03-10T10:00:00' },
-  { id:'v2', confirmDate:'2024-03-12', visitDate:'2024-03-22', plant:'Chennai',   company:'L&T Constructions',     rep:'Ms. Priya Nair',         category:'Technical Review',     criticality:'Medium',   focus:'Quality Audit',      agenda:'Annual quality assessment and process walkthrough at plant floor',   coordinator:'Anita Sharma',  attendees:'Anita Sharma, Quality Head, Plant Manager', stay:'N', hotel:'',                    remarks:'Bring updated QC reports', status:'Confirmed',  createdAt:'2024-03-12T09:00:00' },
+  { id:'v1', confirmDate:'2024-03-10', visitDate:'2024-03-18', plant:'Pune',      company:'Tata Steel Ltd',        rep:'Mr. Suresh Patel',      category:'Business Development', criticality:'High',     focus:'New Order',          agenda:'Discuss Q2 supply chain requirements and annual pricing structure',  coordinator:'Rajesh Kumar',  attendees:'Rajesh Kumar, Vivek Singh, CFO',          stay:'Y', hotel:'Marriott Pune',       remarks:'VIP client — ensure boardroom availability', status:'Scheduled',  createdAt:'2024-03-10T10:00:00' },
+  { id:'v2', confirmDate:'2024-03-12', visitDate:'2024-03-22', plant:'Chennai',   company:'L&T Constructions',     rep:'Ms. Priya Nair',         category:'Technical Review',     criticality:'Medium',   focus:'Quality Audit',      agenda:'Annual quality assessment and process walkthrough at plant floor',   coordinator:'Anita Sharma',  attendees:'Anita Sharma, Quality Head, Plant Manager', stay:'N', hotel:'',                    remarks:'Bring updated QC reports', status:'Scheduled',  createdAt:'2024-03-12T09:00:00' },
   { id:'v3', confirmDate:'2024-03-14', visitDate:'2024-03-16', plant:'Ahmedabad', company:'Reliance Industries',   rep:'Mr. Amit Shah',          category:'Customer Complaint',   criticality:'Critical', focus:'Issue Resolution',    agenda:'Address batch rejection complaint — Lot #R4456, financial impact Rs. 12L', coordinator:'Pradeep Mehta', attendees:'Pradeep Mehta, QA Head, Production Head',   stay:'Y', hotel:'Hyatt Ahmedabad',     remarks:'Priority resolution required', status:'Completed', createdAt:'2024-03-14T11:00:00' },
   { id:'v4', confirmDate:'2024-03-15', visitDate:'2024-03-25', plant:'Pune',      company:'Mahindra & Mahindra',   rep:'Mr. Ravi Gupta',         category:'Partnership',          criticality:'High',     focus:'Strategic Alliance',  agenda:'Explore long-term supplier partnership for EV components — 5yr roadmap', coordinator:'Rajesh Kumar',  attendees:'Rajesh Kumar, CEO, Sales Head, Legal',       stay:'Y', hotel:'Taj Blue Diamond',    remarks:'Board-level meeting — prepare full company profile', status:'Scheduled', createdAt:'2024-03-15T08:00:00' },
   { id:'v5', confirmDate:'2024-03-16', visitDate:'2024-04-02', plant:'Chennai',   company:'SKF Bearings India',    rep:'Ms. Deepa Joshi',        category:'Training',             criticality:'Low',      focus:'Product Demo',        agenda:'New bearing technology demonstration for plant engineers and team',  coordinator:'Anita Sharma',  attendees:'Engineering team (8 members)',              stay:'N', hotel:'',                    remarks:'Arrange projector and training room', status:'Scheduled', createdAt:'2024-03-16T14:00:00' },
@@ -2166,7 +2166,6 @@ function renderDashboard(el) {
   const visits = getVisible();
   const total     = visits.length;
   const scheduled = visits.filter(v => v.status === 'Scheduled').length;
-  const confirmed = visits.filter(v => v.status === 'Confirmed').length;
   const completed = visits.filter(v => v.status === 'Completed').length;
   const critical  = visits.filter(v => v.criticality === 'Critical').length;
   const byCat    = grp(visits,'category');
@@ -2187,7 +2186,6 @@ function renderDashboard(el) {
       const pv = visits.filter(v => v.plant === plant);
       const ptotal = pv.length;
       const pSched = pv.filter(v=>v.status==='Scheduled').length;
-      const pConf  = pv.filter(v=>v.status==='Confirmed').length;
       const pDone  = pv.filter(v=>v.status==='Completed').length;
       const pCrit  = pv.filter(v=>v.criticality==='Critical').length;
       const pHigh  = pv.filter(v=>v.criticality==='High').length;
@@ -2203,7 +2201,6 @@ function renderDashboard(el) {
         </div>
         <div class="plant-stat-rows">
           <div class="plant-stat-row clickable-row" onclick="event.stopPropagation();navToRecords('','Scheduled','${plant}')" title="View scheduled"><span class="plant-stat-label">Scheduled</span><span class="plant-stat-val" style="color:var(--blue)">${pSched} <span style="font-size:9px;opacity:.6">→</span></span></div>
-          <div class="plant-stat-row clickable-row" onclick="event.stopPropagation();navToRecords('','Confirmed','${plant}')" title="View confirmed"><span class="plant-stat-label">Confirmed</span><span class="plant-stat-val" style="color:var(--gold)">${pConf} <span style="font-size:9px;opacity:.6">→</span></span></div>
           <div class="plant-stat-row clickable-row" onclick="event.stopPropagation();navToRecords('','Completed','${plant}')" title="View completed"><span class="plant-stat-label">Completed</span><span class="plant-stat-val" style="color:var(--green)">${pDone} <span style="font-size:9px;opacity:.6">→</span></span></div>
           <div class="plant-stat-row clickable-row" onclick="event.stopPropagation();navToRecords('Critical','','${plant}')" title="View critical"><span class="plant-stat-label">Critical</span><span class="plant-stat-val" style="color:var(--red)">${pCrit} <span style="font-size:9px;opacity:.6">→</span></span></div>
           <div class="plant-stat-row clickable-row" onclick="event.stopPropagation();navToRecords('High','','${plant}')" title="View high priority"><span class="plant-stat-label">High Priority</span><span class="plant-stat-val" style="color:var(--orange)">${pHigh} <span style="font-size:9px;opacity:.6">→</span></span></div>
@@ -2297,7 +2294,7 @@ function renderDashboard(el) {
     updateFbBanner(); // sync banner to current Firebase status
     const catColors = ['#e8c547','#4a90e2','#5abf7a','#e05555','#e08540','#9b59b6','#16a085','#e74c3c'];
     const critColors = { Critical:'#e05555', High:'#e08540', Medium:'#4a90e2', Low:'#5abf7a' };
-    const statusColors = { Scheduled:'#4a90e2', Confirmed:'#e8c547', Completed:'#5abf7a', Cancelled:'#e05555' };
+    const statusColors = { Scheduled:'#4a90e2', Completed:'#5abf7a', Cancelled:'#e05555' };
     const catKeys = Object.keys(byCat);
     chartReg.cat = new Chart(document.getElementById('c_cat'), {
       type:'bar',
@@ -2944,7 +2941,7 @@ function logMail(record, isUpdate) {
   const critColor  = CRIT_COLOR[record.criticality] || '#8888aa';
 
   // ── Status colour map ─────────────────────────────────────────────────
-  const STAT_COLOR = { Confirmed:'#4a90e2', Completed:'#5abf7a', Scheduled:'#9b72e8', Cancelled:'#e05555' };
+  const STAT_COLOR = { Completed:'#5abf7a', Scheduled:'#9b72e8', Cancelled:'#e05555' };
   const statColor  = STAT_COLOR[record.status] || '#8888aa';
 
   const actionLabel = isUpdate ? '✏ Visit Updated' : '✦ New Visit Scheduled';
@@ -3460,7 +3457,6 @@ function buildDailyDigestHtml(visits, since, company, allVisits) {
   const av = allVisits || [];
   const cumTotal     = av.length;
   const cumScheduled = av.filter(v => v.status === 'Scheduled').length;
-  const cumConfirmed = av.filter(v => v.status === 'Confirmed').length;
   const cumCompleted = av.filter(v => v.status === 'Completed').length;
   const cumCritical  = av.filter(v => v.criticality === 'Critical').length;
   const cumByPlant   = {};
@@ -3491,7 +3487,6 @@ function buildDailyDigestHtml(visits, since, company, allVisits) {
               <td style="padding:0 20px;border-right:1px solid #e0e0ee;vertical-align:top">
                 <table cellpadding="0" cellspacing="0" border="0">
                   <tr><td style="padding:2px 12px 2px 0;font-size:12px;color:#2471a3">📅 Scheduled</td><td style="font-size:13px;font-weight:700;color:#2471a3">${cumScheduled}</td></tr>
-                  <tr><td style="padding:2px 12px 2px 0;font-size:12px;color:#b8860b">✅ Confirmed</td><td style="font-size:13px;font-weight:700;color:#b8860b">${cumConfirmed}</td></tr>
                   <tr><td style="padding:2px 12px 2px 0;font-size:12px;color:#1e8449">🏁 Completed</td><td style="font-size:13px;font-weight:700;color:#1e8449">${cumCompleted}</td></tr>
                   <tr><td style="padding:2px 12px 2px 0;font-size:12px;color:#c0392b">⚡ Critical</td><td style="font-size:13px;font-weight:700;color:#c0392b">${cumCritical}</td></tr>
                 </table>
@@ -3508,7 +3503,7 @@ function buildDailyDigestHtml(visits, since, company, allVisits) {
   </tr>` : '';
 
   const CRIT_COLOR = { Critical:'#e05555', High:'#e08540', Medium:'#e8c547', Low:'#5abf7a' };
-  const STAT_COLOR = { Confirmed:'#4a90e2', Completed:'#5abf7a', Scheduled:'#9b72e8', Cancelled:'#e05555' };
+  const STAT_COLOR = { Completed:'#5abf7a', Scheduled:'#9b72e8', Cancelled:'#e05555' };
 
   const visitRows = visits.map(v => {
     const critColor = CRIT_COLOR[v.criticality] || '#8888aa';
@@ -4468,7 +4463,7 @@ function exportPDF() {
   if (!visits.length) { toast('No Records', 'No visit records to export.', true); return; }
 
   const CRIT_COLOR = { Critical:'#e05555', High:'#e08540', Medium:'#e8c547', Low:'#5abf7a' };
-  const STAT_COLOR = { Scheduled:'#4a90e2', Confirmed:'#e8c547', Completed:'#5abf7a', Cancelled:'#e05555' };
+  const STAT_COLOR = { Scheduled:'#4a90e2', Completed:'#5abf7a', Cancelled:'#e05555' };
   const company = _settingsData?.app?.companyName || 'PlantVisit';
   const now = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
 
@@ -4532,7 +4527,6 @@ function exportPDF() {
 <div class="summary">
   <div class="sum-pill">Total <strong>${visits.length}</strong></div>
   <div class="sum-pill">Scheduled <strong style="color:#4a90e2">${visits.filter(v=>v.status==='Scheduled').length}</strong></div>
-  <div class="sum-pill">Confirmed <strong style="color:#e8c547">${visits.filter(v=>v.status==='Confirmed').length}</strong></div>
   <div class="sum-pill">Completed <strong style="color:#5abf7a">${visits.filter(v=>v.status==='Completed').length}</strong></div>
   <div class="sum-pill">Critical <strong style="color:#e05555">${visits.filter(v=>v.criticality==='Critical').length}</strong></div>
 </div>
@@ -4563,7 +4557,7 @@ function critBadge(c) {
   return `<span class="badge ${map[c]||'badge-low'}">${c||'—'}</span>`;
 }
 function statusBadge(s) {
-  const map={Scheduled:'badge-status-s',Confirmed:'badge-status-c',Completed:'badge-status-d',Cancelled:'badge-status-x'};
+  const map={Scheduled:'badge-status-s',Completed:'badge-status-d',Cancelled:'badge-status-x'};
   return `<span class="badge ${map[s]||'badge-status-s'}">${s||'—'}</span>`;
 }
 function grp(arr, key) {
@@ -5666,7 +5660,7 @@ function downloadUploadTemplate() {
 
     [fmt(addDay(7)),  fmt(addDay(30)), '',               PLANTS[2]||'Ahmedabad',
      'Gamma Corp Pvt Ltd',   'Mr. Anil Mehta',    CATEGORIES[2], 'Low',
-     'Product Demo',         'Confirmed',          'Coordinator C',
+     'Product Demo',         'Scheduled',          'Coordinator C',
      'Engineering team (6)', 'N', '', '',
      'Demonstration of new product line for engineering and procurement teams'],
   ];
