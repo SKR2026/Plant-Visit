@@ -1110,7 +1110,14 @@ html.guest-direct-link #mainContent { display: block !important; }
     </div>
     <!-- Modal tabs -->
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 22px;overflow-x:auto">
-      <button id="devTab-keymapping" class="settings-tab active" onclick="switchDevTab('keymapping')">🎹 Key Mapping</button>
+      <button id="devTab-azure"         class="settings-tab active" onclick="switchDevTab('azure')">🔗 Microsoft Graph API</button>
+      <button id="devTab-notifications" class="settings-tab"        onclick="switchDevTab('notifications')">🔔 Notifications</button>
+      <button id="devTab-plants"        class="settings-tab"        onclick="switchDevTab('plants')">🏭 Plants</button>
+      <button id="devTab-categories"    class="settings-tab"        onclick="switchDevTab('categories')">📋 Categories</button>
+      <button id="devTab-users"         class="settings-tab"        onclick="switchDevTab('users')">👥 User Management</button>
+      <button id="devTab-app"           class="settings-tab"        onclick="switchDevTab('app')">⚙ App Config</button>
+      <button id="devTab-license"       class="settings-tab"        onclick="switchDevTab('license')">🔑 License</button>
+      <button id="devTab-keymapping"    class="settings-tab"        onclick="switchDevTab('keymapping')">🎹 Key Mapping</button>
     </div>
     <!-- Modal body -->
     <div id="devPanelBody" style="overflow-y:auto;padding:22px;flex:1"></div>
@@ -1251,7 +1258,7 @@ function _sanitize(str) {
    Only accessible when logged in as the 'developer' account
 ══════════════════════════════════════════════════════════ */
 /* ── Dev Panel active tab ───────────────────────────── */
-let _devActiveTab = 'keymapping';
+let _devActiveTab = 'azure';
 
 function openDevPanel() {
   if (!currentUser || currentUser.id !== 'developer') {
@@ -1261,7 +1268,7 @@ function openDevPanel() {
   _AUDIT.record('DEV_PANEL_OPENED', {});
   const overlay = document.getElementById('devPanelOverlay');
   overlay.style.display = 'flex';
-  switchDevTab('keymapping');
+  switchDevTab(_devActiveTab);
 }
 
 function closeDevPanel() {
@@ -1270,11 +1277,20 @@ function closeDevPanel() {
 
 function switchDevTab(tab) {
   _devActiveTab = tab;
-  const btn = document.getElementById('devTab-keymapping');
-  if (btn) btn.classList.toggle('active', tab === 'keymapping');
+  ['azure','notifications','plants','categories','users','app','license','keymapping'].forEach(t => {
+    const btn = document.getElementById('devTab-' + t);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
   const body = document.getElementById('devPanelBody');
   if (!body) return;
-  if (tab === 'keymapping') renderDevKeyMapping(body);
+  if (tab === 'azure')         renderAzureSettings(body);
+  else if (tab === 'notifications') renderNotificationSettings(body);
+  else if (tab === 'plants')   renderPlantSettings(body);
+  else if (tab === 'categories') renderCategorySettings(body);
+  else if (tab === 'users')    renderUserManagement(body);
+  else if (tab === 'app')      renderAppSettings(body);
+  else if (tab === 'license')  renderLicenseSettings(body);
+  else if (tab === 'keymapping') renderDevKeyMapping(body);
 }
 
 /* Close dev panel when clicking backdrop */
@@ -3645,7 +3661,6 @@ function renderSettings(el) {
     <button class="settings-tab${_settingsActiveTab==='categories'?' active':''}" onclick="switchSettingsTab('categories')">📋 Categories</button>
     <button class="settings-tab${_settingsActiveTab==='users'?' active':''}" onclick="switchSettingsTab('users')">👥 User Management</button>
     <button class="settings-tab${_settingsActiveTab==='app'?' active':''}" onclick="switchSettingsTab('app')">⚙ App Config</button>
-    <button class="settings-tab${_settingsActiveTab==='license'?' active':''}" onclick="switchSettingsTab('license')">🔑 License</button>
   </div>
   <div id="settingsContent"></div>`;
   renderSettingsTab();
@@ -3665,7 +3680,6 @@ function renderSettingsTab() {
   else if (_settingsActiveTab === 'categories') renderCategorySettings(el);
   else if (_settingsActiveTab === 'users') renderUserManagement(el);
   else if (_settingsActiveTab === 'app') renderAppSettings(el);
-  else if (_settingsActiveTab === 'license') renderLicenseSettings(el);
 }
 
 function renderAzureSettings(el) {
