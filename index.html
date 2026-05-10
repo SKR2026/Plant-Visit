@@ -4399,6 +4399,15 @@ function renderLicenseSettings(el) {
   const statusLabel = {open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired'}[statusKey];
   const statusColor = {open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)'}[statusKey];
 
+  // License Key and Expiry Date are restricted to developer only
+  const isDev = currentUser && currentUser.id === 'developer';
+  const licLockAttr   = isDev ? '' : 'disabled readonly';
+  const licLockStyle  = isDev ? '' : 'opacity:0.55;cursor:not-allowed;';
+  const licLockBadge  = isDev ? '' : `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;
+    font-weight:600;color:var(--slate);background:var(--navy4);border:1px solid var(--border2);
+    border-radius:4px;padding:2px 7px;margin-left:8px;vertical-align:middle">
+    🔒 Developer only</span>`;
+
   el.innerHTML = `
   <div class="card">
     <div class="card-header">
@@ -4413,16 +4422,22 @@ function renderLicenseSettings(el) {
       </span>
     </div>
 
+    ${!isDev ? `<div class="alert alert-info" style="margin-bottom:4px">
+      🔒 <strong>License Key</strong> and <strong>Expiry Date</strong> are managed by the developer only.
+      You may update the Organisation name and seat limit.
+    </div>` : ''}
+
     <div class="settings-section">
       <div class="settings-section-title">License Key</div>
       <div class="settings-row">
         <div>
-          <div class="settings-row-label">License Key</div>
+          <div class="settings-row-label">License Key ${licLockBadge}</div>
           <div class="settings-row-sub">Key provided by your developer. Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited.</div>
         </div>
         <div class="settings-row-right">
           <input type="text" class="settings-input mono" id="lic_key"
-            placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off" spellcheck="false">
+            placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off" spellcheck="false"
+            ${licLockAttr} style="${licLockStyle}">
         </div>
       </div>
       <div class="settings-row">
@@ -4440,11 +4455,12 @@ function renderLicenseSettings(el) {
       <div class="settings-section-title">Expiry &amp; Seat Limit</div>
       <div class="settings-row">
         <div>
-          <div class="settings-row-label">License Expiry Date</div>
+          <div class="settings-row-label">License Expiry Date ${licLockBadge}</div>
           <div class="settings-row-sub">Leave blank for no expiry. App warns users 30 days before.</div>
         </div>
         <div class="settings-row-right">
-          <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}">
+          <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}"
+            ${licLockAttr} style="${licLockStyle}">
         </div>
       </div>
       <div class="settings-row">
@@ -4469,7 +4485,7 @@ function renderLicenseSettings(el) {
     </div>` : ''}
 
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-      <button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>
+      ${isDev ? `<button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>` : ''}
       <button class="btn btn-gold"  onclick="saveLicenseSettings()">✓ Save License</button>
     </div>
   </div>
@@ -4504,33 +4520,48 @@ function renderLicenseSettings(el) {
 }
 
 function saveLicenseSettings() {
-  const key    = (document.getElementById('lic_key')?.value    || '').trim() || 'OPEN';
+  const isDev  = currentUser && currentUser.id === 'developer';
   const org    = (document.getElementById('lic_org')?.value    || '').trim();
-  const expiry =  document.getElementById('lic_exp')?.value    || '';
   const seats  =  parseInt(document.getElementById('lic_seats')?.value || '999', 10) || 999;
 
-  if (expiry && new Date(expiry) < new Date()) {
-    toast('⚠ Expiry in Past', 'The expiry date is already past — license will show as expired.', true);
+  // Only developer may change License Key and Expiry Date
+  if (isDev) {
+    const key    = (document.getElementById('lic_key')?.value || '').trim() || 'OPEN';
+    const expiry =  document.getElementById('lic_exp')?.value || '';
+
+    if (expiry && new Date(expiry) < new Date()) {
+      toast('⚠ Expiry in Past', 'The expiry date is already past — license will show as expired.', true);
+    }
+
+    localStorage.setItem('pv_lic_key', key);
+    localStorage.setItem('pv_lic_exp', expiry);
+    _LIC.key    = key;
+    _LIC.expiry = expiry;
+    _LIC.valid  = !expiry || new Date(expiry) >= new Date();
+  } else {
+    // Non-developer attempted to change protected fields — silently preserve existing values
+    if (document.getElementById('lic_key')?.value !== undefined &&
+        document.getElementById('lic_key').value !== (_LIC.key || 'OPEN')) {
+      toast('Access Denied', 'Only the developer can modify the License Key.', true);
+      return;
+    }
   }
 
-  // Persist to localStorage
-  localStorage.setItem('pv_lic_key',   key);
+  // Persist fields accessible to all admins
   localStorage.setItem('pv_lic_org',   org);
-  localStorage.setItem('pv_lic_exp',   expiry);
   localStorage.setItem('pv_lic_seats', String(seats));
-
-  // Update in-memory _LIC immediately (no reload needed)
-  _LIC.key    = key;
-  _LIC.org    = org;
-  _LIC.expiry = expiry;
-  _LIC.seats  = seats;
-  _LIC.valid  = !expiry || new Date(expiry) >= new Date();
+  _LIC.org   = org;
+  _LIC.seats = seats;
 
   toast('✓ License Saved', 'License settings updated successfully.');
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
 function clearLicenseSettings() {
+  if (!currentUser || currentUser.id !== 'developer') {
+    toast('Access Denied', 'Only the developer can clear the license.', true);
+    return;
+  }
   if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode.')) return;
   ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
   _LIC.key = 'OPEN'; _LIC.org = 'PlantVisit Installation';
