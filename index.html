@@ -4413,9 +4413,10 @@ function saveAppSettings() {
 
 /* ══════════════════════════════════════════════════════════
    LICENSE SETTINGS  (Settings → 🔑 License)
-   Super Admin only — writes to localStorage so _LIC picks
-   up the values on next load. Developer can also manage via
-   licensing.html. Both share the same pv_lic_* keys.
+   Developer: full editor.
+   Super Admin (and all others): read-only status view only.
+   All writes go through Firestore (LICENSE_DOC) so every
+   device stays in sync. The admin cannot modify the license.
 ══════════════════════════════════════════════════════════ */
 function renderLicenseSettings(el) {
   const key    = _LIC.key    || 'OPEN';
@@ -4429,21 +4430,69 @@ function renderLicenseSettings(el) {
   const statusLabel = {open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired'}[statusKey];
   const statusColor = {open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)'}[statusKey];
 
-  // License Key and Expiry Date are restricted to developer only
   const isDev = currentUser && currentUser.id === 'developer';
-  const licLockAttr   = isDev ? '' : 'disabled readonly';
-  const licLockStyle  = isDev ? '' : 'opacity:0.55;cursor:not-allowed;';
-  const licLockBadge  = isDev ? '' : `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;
-    font-weight:600;color:var(--slate);background:var(--navy4);border:1px solid var(--border2);
-    border-radius:4px;padding:2px 7px;margin-left:8px;vertical-align:middle">
-    🔒 Developer only</span>`;
 
+  // ── Non-developer: read-only status view, no key exposed, no controls ──
+  if (!isDev) {
+    const expiryStr = expiry
+      ? new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+      : '—';
+    el.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🔑 License Status</div>
+          <div class="card-sub" style="margin-top:3px">Managed by your developer · Read-only</div>
+        </div>
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;
+          border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.2px;
+          color:${statusColor};background:${statusColor}18;border:1px solid ${statusColor}44">
+          ${statusKey==='active'||statusKey==='open'?'✓':statusKey==='expiring'?'⚠':'✕'} ${statusLabel}
+        </span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:8px">
+        <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Status</div>
+          <div style="font-size:15px;font-weight:700;color:${statusColor}">${statusLabel}</div>
+        </div>
+        <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Days Remaining</div>
+          <div style="font-size:15px;font-weight:700;color:var(--white)">${daysLeft!==null?daysLeft:'∞'}</div>
+        </div>
+        <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Expiry</div>
+          <div style="font-size:13px;font-weight:600;color:var(--white)">${expiryStr}</div>
+        </div>
+        <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Licensed To</div>
+          <div style="font-size:13px;font-weight:600;color:var(--white);word-break:break-word">${xe(org)||'—'}</div>
+        </div>
+      </div>
+
+      ${expiry ? `<div class="alert ${valid?(daysLeft<=30?'alert-warn':'alert-success'):'alert-warn'}" style="margin-top:14px">
+        ${valid
+          ? (daysLeft<=30
+              ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>. Contact your developer to renew.`
+              : `✅ Valid — expires ${expiryStr} (${daysLeft} days remaining).`)
+          : `✕ License expired on ${expiryStr}. Contact your developer to renew.`}
+      </div>` : ''}
+
+      <div class="alert alert-info" style="margin-top:14px">
+        🔒 License key and expiry are controlled exclusively by the developer.
+        To renew or update the license, contact your developer.
+      </div>
+    </div>`;
+    return;
+  }
+
+  // ── Developer: full editor ──
   el.innerHTML = `
   <div class="card">
     <div class="card-header">
       <div>
         <div class="card-title">🔑 License Management</div>
-        <div class="card-sub" style="margin-top:3px">Manage the license key for this PlantVisit installation</div>
+        <div class="card-sub" style="margin-top:3px">Developer access — syncs to all devices via Firestore</div>
       </div>
       <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;
         border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.2px;
@@ -4452,28 +4501,22 @@ function renderLicenseSettings(el) {
       </span>
     </div>
 
-    ${!isDev ? `<div class="alert alert-info" style="margin-bottom:4px">
-      🔒 <strong>License Key</strong> and <strong>Expiry Date</strong> are managed by the developer only.
-      You may update the Organisation name and seat limit.
-    </div>` : ''}
-
     <div class="settings-section">
       <div class="settings-section-title">License Key</div>
       <div class="settings-row">
         <div>
-          <div class="settings-row-label">License Key ${licLockBadge}</div>
-          <div class="settings-row-sub">Key provided by your developer. Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited.</div>
+          <div class="settings-row-label">License Key</div>
+          <div class="settings-row-sub">Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited/unlocked.</div>
         </div>
         <div class="settings-row-right">
           <input type="text" class="settings-input mono" id="lic_key"
-            placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off" spellcheck="false"
-            ${licLockAttr} style="${licLockStyle}">
+            placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off" spellcheck="false">
         </div>
       </div>
       <div class="settings-row">
         <div>
           <div class="settings-row-label">Organisation / Client Name</div>
-          <div class="settings-row-sub">Shown in license status and developer panel</div>
+          <div class="settings-row-sub">Shown in license status</div>
         </div>
         <div class="settings-row-right">
           <input type="text" class="settings-input" id="lic_org" placeholder="Company name" value="${xe(org)}">
@@ -4485,12 +4528,11 @@ function renderLicenseSettings(el) {
       <div class="settings-section-title">Expiry &amp; Seat Limit</div>
       <div class="settings-row">
         <div>
-          <div class="settings-row-label">License Expiry Date ${licLockBadge}</div>
+          <div class="settings-row-label">License Expiry Date</div>
           <div class="settings-row-sub">Leave blank for no expiry. App warns users 30 days before.</div>
         </div>
         <div class="settings-row-right">
-          <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}"
-            ${licLockAttr} style="${licLockStyle}">
+          <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}">
         </div>
       </div>
       <div class="settings-row">
@@ -4509,14 +4551,14 @@ function renderLicenseSettings(el) {
     <div class="alert ${valid?(daysLeft<=30?'alert-warn':'alert-success'):'alert-warn'}" style="margin-top:4px">
       ${valid
         ? (daysLeft<=30
-            ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>. Contact your developer to renew.`
+            ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>.`
             : `✅ Valid — expires ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} (${daysLeft} days remaining).`)
-        : `✕ License expired on ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}. Contact your developer to renew.`}
+        : `✕ Expired on ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}.`}
     </div>` : ''}
 
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-      ${isDev ? `<button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>` : ''}
-      <button class="btn btn-gold"  onclick="saveLicenseSettings()">✓ Save License</button>
+      <button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>
+      <button class="btn btn-gold"  onclick="saveLicenseSettings()">✓ Save &amp; Sync License</button>
     </div>
   </div>
 
@@ -4541,64 +4583,43 @@ function renderLicenseSettings(el) {
       </div>
     </div>
     <div class="alert alert-info" style="margin-top:14px">
-      ℹ License settings are stored locally on this device (browser localStorage).
-      The developer can also manage licensing via the separate
-      <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">licensing.html</code> panel.
-      Both share the same storage keys.
+      ℹ License is stored in Firestore (<code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">config/license</code>)
+      and syncs to all devices in real-time. The Developer Panel also manages this.
     </div>
   </div>`;
 }
 
 function saveLicenseSettings() {
-  const isDev  = currentUser && currentUser.id === 'developer';
-  const org    = (document.getElementById('lic_org')?.value    || '').trim();
+  // Hard block: only the developer account may call this function
+  if (!currentUser || currentUser.id !== 'developer') {
+    toast('Access Denied', 'License can only be modified by the developer.', true);
+    return;
+  }
+  const key    = (document.getElementById('lic_key')?.value || '').trim() || 'OPEN';
+  const org    = (document.getElementById('lic_org')?.value || '').trim();
+  const expiry =  document.getElementById('lic_exp')?.value || '';
   const seats  =  parseInt(document.getElementById('lic_seats')?.value || '999', 10) || 999;
 
-  // Only developer may change License Key and Expiry Date
-  if (isDev) {
-    const key    = (document.getElementById('lic_key')?.value || '').trim() || 'OPEN';
-    const expiry =  document.getElementById('lic_exp')?.value || '';
-
-    if (expiry && new Date(expiry) < new Date()) {
-      toast('⚠ Expiry in Past', 'The expiry date is already past — license will show as expired.', true);
-    }
-
-    localStorage.setItem('pv_lic_key', key);
-    localStorage.setItem('pv_lic_exp', expiry);
-    _LIC.key    = key;
-    _LIC.expiry = expiry;
-    _LIC.valid  = !expiry || new Date(expiry) >= new Date();
-  } else {
-    // Non-developer attempted to change protected fields — silently preserve existing values
-    if (document.getElementById('lic_key')?.value !== undefined &&
-        document.getElementById('lic_key').value !== (_LIC.key || 'OPEN')) {
-      toast('Access Denied', 'Only the developer can modify the License Key.', true);
-      return;
-    }
+  if (expiry && new Date(expiry) < new Date()) {
+    toast('⚠ Expiry in Past', 'The expiry date is already past — license will show as expired.', true);
   }
 
-  // Persist fields accessible to all admins
-  _LIC.org   = org;
-  _LIC.seats = seats;
-  localStorage.setItem('pv_lic_org',   org);
-  localStorage.setItem('pv_lic_seats', String(seats));
-
-  // Always sync full license object to Firestore for cross-device consistency
-  _saveLicToFirestore({ key: _LIC.key, org: _LIC.org, expiry: _LIC.expiry, seats: _LIC.seats });
-
-  toast('✓ License Saved', 'License settings updated and synced to all devices.');
+  const lic = { key, org, expiry, seats };
+  _applyLicData(lic);
+  _saveLicToFirestore(lic);
+  toast('✓ License Saved', 'Syncing to all devices…');
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
 function clearLicenseSettings() {
+  // Hard block: only the developer account may call this function
   if (!currentUser || currentUser.id !== 'developer') {
-    toast('Access Denied', 'Only the developer can clear the license.', true);
+    toast('Access Denied', 'License can only be cleared by the developer.', true);
     return;
   }
-  if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode.')) return;
+  if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode on all devices.')) return;
   ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
   _LIC.key = 'OPEN'; _LIC.org = ''; _LIC.expiry = ''; _LIC.seats = 999; _LIC.valid = true;
-  // Sync clear to Firestore so all devices revert to open/unlimited
   LICENSE_DOC.set({ key:'OPEN', org:'', expiry:'', seats:999 })
     .catch(e => console.error('[PlantVisit] License clear Firestore error:', e));
   toast('License Cleared', 'Reset to open/unlimited — syncing to all devices.');
