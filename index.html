@@ -1193,7 +1193,7 @@ const _AUDIT = (() => {
 })();
 
 /* ── License state (managed by licensing.html) */
-const _LIC = {
+let _LIC = {
   key:    localStorage.getItem('pv_lic_key')   || 'OPEN',
   expiry: localStorage.getItem('pv_lic_exp')   || '',
   org:    localStorage.getItem('pv_lic_org')   || 'PlantVisit Installation',
@@ -3392,6 +3392,7 @@ function renderSettings(el) {
     <button class="settings-tab${_settingsActiveTab==='categories'?' active':''}" onclick="switchSettingsTab('categories')">📋 Categories</button>
     <button class="settings-tab${_settingsActiveTab==='users'?' active':''}" onclick="switchSettingsTab('users')">👥 User Management</button>
     <button class="settings-tab${_settingsActiveTab==='app'?' active':''}" onclick="switchSettingsTab('app')">⚙ App Config</button>
+    <button class="settings-tab${_settingsActiveTab==='license'?' active':''}" onclick="switchSettingsTab('license')">🔑 License</button>
   </div>
   <div id="settingsContent"></div>`;
   renderSettingsTab();
@@ -3411,6 +3412,7 @@ function renderSettingsTab() {
   else if (_settingsActiveTab === 'categories') renderCategorySettings(el);
   else if (_settingsActiveTab === 'users') renderUserManagement(el);
   else if (_settingsActiveTab === 'app') renderAppSettings(el);
+  else if (_settingsActiveTab === 'license') renderLicenseSettings(el);
 }
 
 function renderAzureSettings(el) {
@@ -4027,6 +4029,158 @@ function saveAppSettings() {
   saveSettings();
   toast('✓ App Config Saved', 'Application settings updated.');
 }
+
+/* ══════════════════════════════════════════════════════════
+   LICENSE SETTINGS — Super Admin only (Settings → 🔑 License)
+   Saves key/expiry/org/seats to localStorage so the security
+   module (_LIC) picks them up on next page load.
+   The developer account manages the same store via licensing.html.
+══════════════════════════════════════════════════════════ */
+function renderLicenseSettings(el) {
+  const key    = localStorage.getItem('pv_lic_key')   || 'OPEN';
+  const expiry = localStorage.getItem('pv_lic_exp')   || '';
+  const org    = localStorage.getItem('pv_lic_org')   || '';
+  const seats  = localStorage.getItem('pv_lic_seats') || '999';
+  const daysLeft = expiry ? Math.ceil((new Date(expiry) - new Date()) / 86400000) : null;
+  const licValid = !expiry || daysLeft > 0;
+  const licStatus = key === 'OPEN' ? 'open'
+                  : !licValid     ? 'expired'
+                  : daysLeft !== null && daysLeft <= 30 ? 'expiring'
+                  : 'active';
+  const statusLabel = { open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired' }[licStatus];
+  const statusColor = { open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)' }[licStatus];
+  const statusBg    = { open:'var(--purple-bg)', active:'var(--green-bg)', expiring:'var(--orange-bg)', expired:'var(--red-bg)' }[licStatus];
+
+  el.innerHTML = `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🔑 License Management</div>
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;color:${statusColor};background:${statusBg};border:1px solid ${statusColor}33">
+        ${licStatus === 'active' || licStatus === 'open' ? '✓' : licStatus === 'expiring' ? '⚠' : '✕'} ${statusLabel}
+      </span>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">License Key</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">License Key</div>
+          <div class="settings-row-sub">Enter the key provided by your developer. Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited open license.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="text" class="settings-input mono" id="lic_key" placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off">
+        </div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Organisation / Client Name</div>
+          <div class="settings-row-sub">Shown in the panel header and license status</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="text" class="settings-input" id="lic_org" placeholder="Company name" value="${xe(org)}">
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Expiry &amp; Seat Limit</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">License Expiry Date</div>
+          <div class="settings-row-sub">Leave blank for no expiry. App warns 30 days before.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}">
+        </div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Maximum Seats</div>
+          <div class="settings-row-sub">Concurrent licensed users. Use 999 for unlimited.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="number" class="settings-input" id="lic_seats" value="${xe(seats)}" min="1" max="9999" placeholder="999" style="width:120px">
+        </div>
+      </div>
+    </div>
+
+    ${expiry ? `
+    <div class="alert ${licValid ? (daysLeft <= 30 ? 'alert-warn' : 'alert-success') : 'alert-warn'}" style="margin-bottom:0;margin-top:4px">
+      ${licValid
+        ? (daysLeft <= 30
+          ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>. Contact your developer to renew.`
+          : `✅ License valid — expires ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} (${daysLeft} days remaining).`)
+        : `✕ License expired on ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}. Contact your developer to renew.`}
+    </div>` : ''}
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>
+      <button class="btn btn-gold" onclick="saveLicenseSettings()">✓ Save License</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">License Status</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
+        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Status</div>
+        <div style="font-size:15px;font-weight:700;color:${statusColor}">${statusLabel}</div>
+      </div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
+        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Days Left</div>
+        <div style="font-size:15px;font-weight:700;color:var(--white)">${daysLeft !== null ? daysLeft : '∞'}</div>
+      </div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
+        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Max Seats</div>
+        <div style="font-size:15px;font-weight:700;color:var(--white)">${parseInt(seats) >= 999 ? '∞' : seats}</div>
+      </div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
+        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Key</div>
+        <div style="font-size:12px;font-weight:600;color:var(--white);font-family:monospace">${key.length > 12 ? key.slice(0,12)+'…' : key}</div>
+      </div>
+    </div>
+    <div class="alert alert-info" style="margin-top:14px">
+      ℹ License settings are stored locally on this device. The developer can also manage licensing via the separate <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">licensing.html</code> panel.
+    </div>
+  </div>`;
+}
+
+function saveLicenseSettings() {
+  const key    = (document.getElementById('lic_key')?.value  || '').trim() || 'OPEN';
+  const org    = (document.getElementById('lic_org')?.value  || '').trim();
+  const expiry = document.getElementById('lic_exp')?.value   || '';
+  const seats  = document.getElementById('lic_seats')?.value || '999';
+
+  if (expiry && new Date(expiry) < new Date()) {
+    toast('⚠ Invalid Expiry', 'The expiry date is already in the past. License will appear expired.', true);
+  }
+
+  localStorage.setItem('pv_lic_key',   key);
+  localStorage.setItem('pv_lic_org',   org);
+  localStorage.setItem('pv_lic_exp',   expiry);
+  localStorage.setItem('pv_lic_seats', seats);
+
+  // Update in-memory _LIC state immediately
+  _LIC.key    = key;
+  _LIC.org    = org;
+  _LIC.expiry = expiry;
+  _LIC.seats  = parseInt(seats, 10);
+  _LIC.valid  = !expiry || new Date(expiry) >= new Date();
+
+  toast('✓ License Saved', 'License settings updated. Reload to fully apply.');
+  // Re-render the tab to show updated status
+  renderLicenseSettings(document.getElementById('settingsContent'));
+}
+
+function clearLicenseSettings() {
+  if (!confirm('Clear license settings? The installation will revert to open/unlimited mode.')) return;
+  ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
+  _LIC.key = 'OPEN'; _LIC.expiry = ''; _LIC.valid = true; _LIC.seats = 999;
+  toast('License Cleared', 'Reset to open/unlimited mode.');
+  renderLicenseSettings(document.getElementById('settingsContent'));
+}
+
+
 
 /* ══════════════════════════════════════════════════════════
    USER MANAGEMENT
