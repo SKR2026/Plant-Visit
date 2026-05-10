@@ -1354,7 +1354,7 @@ function renderDevLicensing(el) {
           <div style="font-size:14px;font-weight:700;color:${c}">${v}</div>
         </div>`).join('')}
     </div>
-    <div class="alert alert-info" style="margin-top:14px">ℹ License settings are stored in browser <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">localStorage</code>. The superadmin Settings → License tab also writes the same keys.</div>
+    <div class="alert alert-info" style="margin-top:14px">ℹ License settings are stored in <strong>Firestore</strong> and sync across all devices automatically. Browser localStorage is used only as a fast-boot cache.</div>
   </div>`;
 }
 
@@ -1364,19 +1364,20 @@ function devSaveLicense() {
   const expiry =  document.getElementById('dlic_exp')?.value  || '';
   const seats  =  parseInt(document.getElementById('dlic_seats')?.value || '999', 10) || 999;
   if (expiry && new Date(expiry) < new Date()) toast('⚠ Expiry in Past', 'License will show as expired.', true);
-  localStorage.setItem('pv_lic_key',   key);
-  localStorage.setItem('pv_lic_org',   org);
-  localStorage.setItem('pv_lic_exp',   expiry);
-  localStorage.setItem('pv_lic_seats', String(seats));
-  _LIC.key = key; _LIC.org = org; _LIC.expiry = expiry; _LIC.seats = seats;
-  toast('✓ License Saved', 'Key: ' + key);
+  const lic = { key, org, expiry, seats };
+  _applyLicData(lic);
+  _saveLicToFirestore(lic);  // sync to Firestore so all devices see the same license
+  toast('✓ License Saved', 'Key: ' + key + ' — syncing to all devices…');
   renderDevLicensing(document.getElementById('devPanelBody'));
 }
 
 function devClearLicense() {
   ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
   _LIC.key='OPEN'; _LIC.org=''; _LIC.expiry=''; _LIC.seats=999; _LIC.valid=true;
-  toast('License Cleared', 'Reverted to OPEN/unlimited.');
+  // Sync clear to Firestore
+  SETTINGS_DOC.set({ license: { key:'OPEN', org:'', expiry:'', seats:999 } }, { merge: true })
+    .catch(e => console.error('[PlantVisit] License clear Firestore error:', e));
+  toast('License Cleared', 'Reverted to OPEN/unlimited — syncing to all devices…');
   renderDevLicensing(document.getElementById('devPanelBody'));
 }
 
@@ -2154,8 +2155,32 @@ function initFirestoreListeners() {
       if (doc.data().dailyDigest) {
         _settingsData.dailyDigest = { ..._settingsData.dailyDigest, ...doc.data().dailyDigest };
       }
+      // Sync license from Firestore -> _LIC + localStorage cache (cross-device source of truth)
+      if (doc.data().license) {
+        _applyLicData(doc.data().license);
+      }
     }
   }, e => console.error(e));
+}
+
+/* -- License helper: apply a license object to _LIC + localStorage cache -- */
+function _applyLicData(lic) {
+  if (!lic) return;
+  if (lic.key    !== undefined) { _LIC.key    = lic.key;    localStorage.setItem('pv_lic_key',   lic.key); }
+  if (lic.org    !== undefined) { _LIC.org    = lic.org;    localStorage.setItem('pv_lic_org',   lic.org); }
+  if (lic.expiry !== undefined) { _LIC.expiry = lic.expiry; localStorage.setItem('pv_lic_exp',   lic.expiry); }
+  if (lic.seats  !== undefined) { _LIC.seats  = lic.seats;  localStorage.setItem('pv_lic_seats', String(lic.seats)); }
+  _LIC.valid = !_LIC.expiry || new Date(_LIC.expiry) >= new Date();
+}
+
+/* -- License helper: persist license to Firestore + localStorage -- */
+function _saveLicToFirestore(lic) {
+  localStorage.setItem('pv_lic_key',   lic.key);
+  localStorage.setItem('pv_lic_org',   lic.org);
+  localStorage.setItem('pv_lic_exp',   lic.expiry);
+  localStorage.setItem('pv_lic_seats', String(lic.seats));
+  SETTINGS_DOC.set({ license: lic }, { merge: true })
+    .catch(e => { console.error('[PlantVisit] License Firestore save error:', e); toast('Warning', 'License saved locally but Firestore sync failed: ' + (e.code || e.message), true); });
 }
 
 function bootApp() {
@@ -4548,12 +4573,15 @@ function saveLicenseSettings() {
   }
 
   // Persist fields accessible to all admins
-  localStorage.setItem('pv_lic_org',   org);
-  localStorage.setItem('pv_lic_seats', String(seats));
   _LIC.org   = org;
   _LIC.seats = seats;
+  localStorage.setItem('pv_lic_org',   org);
+  localStorage.setItem('pv_lic_seats', String(seats));
 
-  toast('✓ License Saved', 'License settings updated successfully.');
+  // Always sync full license object to Firestore for cross-device consistency
+  _saveLicToFirestore({ key: _LIC.key, org: _LIC.org, expiry: _LIC.expiry, seats: _LIC.seats });
+
+  toast('✓ License Saved', 'License settings updated and synced to all devices.');
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
@@ -4564,9 +4592,11 @@ function clearLicenseSettings() {
   }
   if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode.')) return;
   ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
-  _LIC.key = 'OPEN'; _LIC.org = 'PlantVisit Installation';
-  _LIC.expiry = ''; _LIC.seats = 999; _LIC.valid = true;
-  toast('License Cleared', 'Reset to open/unlimited mode.');
+  _LIC.key = 'OPEN'; _LIC.org = ''; _LIC.expiry = ''; _LIC.seats = 999; _LIC.valid = true;
+  // Sync clear to Firestore so all devices revert to open/unlimited
+  SETTINGS_DOC.set({ license: { key:'OPEN', org:'', expiry:'', seats:999 } }, { merge: true })
+    .catch(e => console.error('[PlantVisit] License clear Firestore error:', e));
+  toast('License Cleared', 'Reset to open/unlimited — syncing to all devices.');
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
