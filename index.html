@@ -1100,28 +1100,19 @@ html.guest-direct-link #mainContent { display: block !important; }
 <div id="devPanelOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:3000;align-items:center;justify-content:center">
   <div id="devPanelModal" style="background:var(--navy2);border:1px solid var(--border2);border-radius:var(--radius-lg);width:min(1080px,98vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.6);animation:slideUp .22s ease">
     <!-- Modal header -->
-    <div style="display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--border);flex-shrink:0">
       <span style="font-size:18px">⚙</span>
       <div>
         <div style="font-family:var(--font-display);font-size:17px;color:var(--white)">Developer Panel</div>
         <div style="font-size:11px;color:var(--slate);margin-top:1px">Internal tools — developer access only</div>
       </div>
       <div style="flex:1"></div>
-      <button onclick="closeDevPanel()" style="background:none;border:none;color:var(--slate);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:var(--radius);transition:color .15s" onmouseover="this.style.color='var(--white)'" onmouseout="this.style.color='var(--slate)'">✕</button>
+      <button onclick="closeDevPanel()" style="background:none;border:none;color:var(--slate);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:var(--radius);transition:color .15s" onmouseover="this.style.color='var(--white)'" onmouseout="this.style.color='var(--slate)'">&#x2715;</button>
     </div>
-    <!-- Modal tabs -->
-    <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 12px;flex-wrap:wrap">
-      <button id="devTab-azure"         class="settings-tab active" onclick="switchDevTab('azure')">🔗 Microsoft Graph API</button>
-      <button id="devTab-notifications" class="settings-tab"        onclick="switchDevTab('notifications')">🔔 Notifications</button>
-      <button id="devTab-plants"        class="settings-tab"        onclick="switchDevTab('plants')">🏭 Plants</button>
-      <button id="devTab-categories"    class="settings-tab"        onclick="switchDevTab('categories')">📋 Categories</button>
-      <button id="devTab-users"         class="settings-tab"        onclick="switchDevTab('users')">👥 User Management</button>
-      <button id="devTab-app"           class="settings-tab"        onclick="switchDevTab('app')">⚙ App Config</button>
-      <button id="devTab-license"       class="settings-tab"        onclick="switchDevTab('license')">🔑 License</button>
-      <button id="devTab-keymapping"    class="settings-tab"        onclick="switchDevTab('keymapping')">🎹 Key Mapping</button>
-    </div>
+    <!-- Modal tabs (rebuilt by JS on every open) -->
+    <div id="devPanelTabs" style="display:flex;gap:2px;border-bottom:1px solid var(--border);padding:6px 10px 0;flex-wrap:wrap;flex-shrink:0;background:var(--navy2)"></div>
     <!-- Modal body -->
-    <div id="devPanelBody" style="overflow-y:auto;padding:22px;flex:1"></div>
+    <div id="devPanelBody" style="overflow-y:auto;padding:22px;flex:1;min-height:200px"></div>
   </div>
 </div>
 
@@ -1258,8 +1249,34 @@ function _sanitize(str) {
    DEVELOPER PANEL — opens licensing.html in a new tab
    Only accessible when logged in as the 'developer' account
 ══════════════════════════════════════════════════════════ */
-/* ── Dev Panel active tab ───────────────────────────── */
+/* ── Dev Panel: definitive tab list ─────────────────── */
+const _DEV_TABS = [
+  { id:'azure',         label:'\u{1F517} Microsoft Graph API', render: el => renderAzureSettings(el) },
+  { id:'notifications', label:'\u{1F514} Notifications',        render: el => renderNotificationSettings(el) },
+  { id:'plants',        label:'\u{1F3ED} Plants',                render: el => renderPlantSettings(el) },
+  { id:'categories',    label:'\u{1F4CB} Categories',            render: el => renderCategorySettings(el) },
+  { id:'users',         label:'\u{1F465} User Management',       render: el => renderUserManagement(el) },
+  { id:'app',           label:'\u2699 App Config',              render: el => renderAppSettings(el) },
+  { id:'license',       label:'\u{1F511} License',               render: el => renderLicenseSettings(el) },
+  { id:'keymapping',    label:'\u{1F3B9} Key Mapping',           render: el => renderDevKeyMapping(el) },
+];
+
 let _devActiveTab = 'azure';
+
+/* Build the tab bar from _DEV_TABS — guarantees all tabs exist */
+function _buildDevTabs() {
+  const bar = document.getElementById('devPanelTabs');
+  if (!bar) return;
+  bar.innerHTML = '';
+  _DEV_TABS.forEach(t => {
+    const btn = document.createElement('button');
+    btn.id = 'devTab-' + t.id;
+    btn.className = 'settings-tab' + (t.id === _devActiveTab ? ' active' : '');
+    btn.textContent = t.label;
+    btn.onclick = () => switchDevTab(t.id);
+    bar.appendChild(btn);
+  });
+}
 
 function openDevPanel() {
   if (!currentUser || currentUser.id !== 'developer') {
@@ -1269,6 +1286,7 @@ function openDevPanel() {
   _AUDIT.record('DEV_PANEL_OPENED', {});
   const overlay = document.getElementById('devPanelOverlay');
   overlay.style.display = 'flex';
+  _buildDevTabs();           // always rebuild — guarantees all 8 tabs present
   switchDevTab(_devActiveTab);
 }
 
@@ -1278,20 +1296,16 @@ function closeDevPanel() {
 
 function switchDevTab(tab) {
   _devActiveTab = tab;
-  ['azure','notifications','plants','categories','users','app','license','keymapping'].forEach(t => {
-    const btn = document.getElementById('devTab-' + t);
-    if (btn) btn.classList.toggle('active', t === tab);
+  // Update active class on every tab button
+  _DEV_TABS.forEach(t => {
+    const btn = document.getElementById('devTab-' + t.id);
+    if (btn) btn.classList.toggle('active', t.id === tab);
   });
+  // Render content
   const body = document.getElementById('devPanelBody');
   if (!body) return;
-  if (tab === 'azure')         renderAzureSettings(body);
-  else if (tab === 'notifications') renderNotificationSettings(body);
-  else if (tab === 'plants')   renderPlantSettings(body);
-  else if (tab === 'categories') renderCategorySettings(body);
-  else if (tab === 'users')    renderUserManagement(body);
-  else if (tab === 'app')      renderAppSettings(body);
-  else if (tab === 'license')  renderLicenseSettings(body);
-  else if (tab === 'keymapping') renderDevKeyMapping(body);
+  const def = _DEV_TABS.find(t => t.id === tab);
+  if (def) def.render(body);
 }
 
 /* Close dev panel when clicking backdrop */
