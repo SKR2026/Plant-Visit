@@ -1215,26 +1215,19 @@ const _AUDIT = (() => {
   };
 })();
 
-/* ── License state (managed by licensing.html and Settings → License tab) */
+/* ── License state — Firestore is the single source of truth ──────────────
+   _LIC starts empty/open. LICENSE_DOC.onSnapshot() (wired in
+   startFirestoreListeners) applies real values the moment they arrive,
+   and keeps every device in sync for the lifetime of the session.
+   localStorage is NO LONGER used for license storage.
+   ─────────────────────────────────────────────────────────────────────── */
 let _LIC = {
-  key:    localStorage.getItem('pv_lic_key')   || 'OPEN',
-  expiry: localStorage.getItem('pv_lic_exp')   || '',
-  org:    localStorage.getItem('pv_lic_org')   || 'PlantVisit Installation',
-  seats:  parseInt(localStorage.getItem('pv_lic_seats') || '999', 10),
+  key:    'OPEN',
+  expiry: '',
+  org:    'PlantVisit Installation',
+  seats:  999,
   valid:  true,
 };
-(function checkLicense() {
-  if (_LIC.expiry && new Date(_LIC.expiry) < new Date()) {
-    _LIC.valid = false;
-    console.warn('[PlantVisit] \u26a0 License expired:', _LIC.expiry);
-  }
-  if (_LIC.valid && _LIC.expiry) {
-    const days = Math.ceil((new Date(_LIC.expiry) - new Date()) / 86400000);
-    if (days <= 30) {
-      setTimeout(() => toast('License Expiring Soon', 'Expires in ' + days + ' day' + (days !== 1 ? 's' : '') + '. Contact your developer.', true), 6000);
-    }
-  }
-})();
 
 /* ── Secure XSS sanitizer — xe() is the app's existing alias */
 function _sanitize(str) {
@@ -1372,12 +1365,11 @@ function devSaveLicense() {
 }
 
 function devClearLicense() {
-  ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
-  _LIC.key='OPEN'; _LIC.org=''; _LIC.expiry=''; _LIC.seats=999; _LIC.valid=true;
-  // Sync clear to Firestore
-  LICENSE_DOC.set({ key:'OPEN', org:'', expiry:'', seats:999 })
-    .catch(e => console.error('[PlantVisit] License clear Firestore error:', e));
-  toast('License Cleared', 'Reverted to OPEN/unlimited — syncing to all devices…');
+  if (!confirm('Clear license?\n\nAll devices will revert to OPEN/unlimited instantly.')) return;
+  LICENSE_DOC.set({ key:'OPEN', org:'', expiry:'', seats:999,
+    updatedAt: new Date().toISOString(), updatedBy: currentUser?.id || 'system' })
+    .then(() => toast('License Cleared', 'Reset to OPEN/unlimited — pushed to all devices.'))
+    .catch(e => { console.error('[PlantVisit] License clear error:', e); toast('Clear Failed', e.message, true); });
   renderDevLicensing(document.getElementById('devPanelBody'));
 }
 
@@ -2168,24 +2160,44 @@ function initFirestoreListeners() {
   }, e => console.error(e));
 }
 
-/* -- License helper: apply a license object to _LIC + localStorage cache -- */
+/* -- License helper: apply a Firestore license doc to the in-memory _LIC --
+   Pure memory update — no localStorage. Firestore onSnapshot is the only
+   writer so all devices always reflect the same state.                    */
 function _applyLicData(lic) {
   if (!lic) return;
-  if (lic.key    !== undefined) { _LIC.key    = lic.key;    localStorage.setItem('pv_lic_key',   lic.key); }
-  if (lic.org    !== undefined) { _LIC.org    = lic.org;    localStorage.setItem('pv_lic_org',   lic.org); }
-  if (lic.expiry !== undefined) { _LIC.expiry = lic.expiry; localStorage.setItem('pv_lic_exp',   lic.expiry); }
-  if (lic.seats  !== undefined) { _LIC.seats  = lic.seats;  localStorage.setItem('pv_lic_seats', String(lic.seats)); }
+  if (lic.key    !== undefined) _LIC.key    = lic.key;
+  if (lic.org    !== undefined) _LIC.org    = lic.org;
+  if (lic.expiry !== undefined) _LIC.expiry = lic.expiry;
+  if (lic.seats  !== undefined) _LIC.seats  = parseInt(lic.seats, 10) || 999;
   _LIC.valid = !_LIC.expiry || new Date(_LIC.expiry) >= new Date();
+  // Expiry warning (shown once after data arrives)
+  if (!_LIC.valid) {
+    console.warn('[PlantVisit] ⚠ License expired:', _LIC.expiry);
+  } else if (_LIC.expiry) {
+    const days = Math.ceil((new Date(_LIC.expiry) - new Date()) / 86400000);
+    if (days <= 30) {
+      setTimeout(() => toast('License Expiring Soon',
+        'Expires in ' + days + ' day' + (days !== 1 ? 's' : '') + '. Contact your developer.', true), 6000);
+    }
+  }
 }
 
-/* -- License helper: persist license to Firestore + localStorage -- */
+/* -- License helper: persist license to Firestore only ─────────────────────
+   Firestore is the single source of truth. The onSnapshot listener in
+   startFirestoreListeners() propagates the change to _LIC on every device
+   automatically — no localStorage involved.                                */
 function _saveLicToFirestore(lic) {
-  localStorage.setItem('pv_lic_key',   lic.key);
-  localStorage.setItem('pv_lic_org',   lic.org);
-  localStorage.setItem('pv_lic_exp',   lic.expiry);
-  localStorage.setItem('pv_lic_seats', String(lic.seats));
-  LICENSE_DOC.set(lic)
-    .catch(e => { console.error('[PlantVisit] License Firestore save error:', e); toast('Warning', 'License saved locally but Firestore sync failed: ' + (e.code || e.message), true); });
+  LICENSE_DOC.set({
+    key:       lic.key    || 'OPEN',
+    org:       lic.org    || '',
+    expiry:    lic.expiry || '',
+    seats:     lic.seats  || 999,
+    updatedAt: new Date().toISOString(),
+    updatedBy: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.id : 'system'
+  }).catch(e => {
+    console.error('[PlantVisit] License Firestore save error:', e);
+    toast('Sync Warning', 'Firestore save failed: ' + (e.code || e.message), true);
+  });
 }
 
 function bootApp() {
@@ -4617,12 +4629,11 @@ function clearLicenseSettings() {
     toast('Access Denied', 'License can only be cleared by the developer.', true);
     return;
   }
-  if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode on all devices.')) return;
-  ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
-  _LIC.key = 'OPEN'; _LIC.org = ''; _LIC.expiry = ''; _LIC.seats = 999; _LIC.valid = true;
-  LICENSE_DOC.set({ key:'OPEN', org:'', expiry:'', seats:999 })
-    .catch(e => console.error('[PlantVisit] License clear Firestore error:', e));
-  toast('License Cleared', 'Reset to open/unlimited — syncing to all devices.');
+  if (!confirm('Clear license settings?\n\nAll devices will revert to open/unlimited instantly.')) return;
+  LICENSE_DOC.set({ key:'OPEN', org:'', expiry:'', seats:999,
+    updatedAt: new Date().toISOString(), updatedBy: currentUser.id })
+    .then(() => toast('License Cleared', 'Reset to open/unlimited — pushed to all devices.'))
+    .catch(e => { console.error('[PlantVisit] License clear error:', e); toast('Clear Failed', e.message, true); });
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
