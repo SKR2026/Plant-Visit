@@ -1192,7 +1192,7 @@ const _AUDIT = (() => {
   };
 })();
 
-/* ── License state (managed by licensing.html) */
+/* ── License state (managed by licensing.html and Settings → License tab) */
 let _LIC = {
   key:    localStorage.getItem('pv_lic_key')   || 'OPEN',
   expiry: localStorage.getItem('pv_lic_exp')   || '',
@@ -4031,32 +4031,34 @@ function saveAppSettings() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   LICENSE SETTINGS — Super Admin only (Settings → 🔑 License)
-   Saves key/expiry/org/seats to localStorage so the security
-   module (_LIC) picks them up on next page load.
-   The developer account manages the same store via licensing.html.
+   LICENSE SETTINGS  (Settings → 🔑 License)
+   Super Admin only — writes to localStorage so _LIC picks
+   up the values on next load. Developer can also manage via
+   licensing.html. Both share the same pv_lic_* keys.
 ══════════════════════════════════════════════════════════ */
 function renderLicenseSettings(el) {
-  const key    = localStorage.getItem('pv_lic_key')   || 'OPEN';
-  const expiry = localStorage.getItem('pv_lic_exp')   || '';
-  const org    = localStorage.getItem('pv_lic_org')   || '';
-  const seats  = localStorage.getItem('pv_lic_seats') || '999';
+  const key    = _LIC.key    || 'OPEN';
+  const expiry = _LIC.expiry || '';
+  const org    = _LIC.org    || '';
+  const seats  = _LIC.seats  || 999;
   const daysLeft = expiry ? Math.ceil((new Date(expiry) - new Date()) / 86400000) : null;
-  const licValid = !expiry || daysLeft > 0;
-  const licStatus = key === 'OPEN' ? 'open'
-                  : !licValid     ? 'expired'
-                  : daysLeft !== null && daysLeft <= 30 ? 'expiring'
-                  : 'active';
-  const statusLabel = { open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired' }[licStatus];
-  const statusColor = { open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)' }[licStatus];
-  const statusBg    = { open:'var(--purple-bg)', active:'var(--green-bg)', expiring:'var(--orange-bg)', expired:'var(--red-bg)' }[licStatus];
+  const valid    = _LIC.valid !== false && (!expiry || daysLeft > 0);
+
+  const statusKey   = (key==='OPEN'&&!expiry) ? 'open' : !valid ? 'expired' : (daysLeft!==null&&daysLeft<=30) ? 'expiring' : 'active';
+  const statusLabel = {open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired'}[statusKey];
+  const statusColor = {open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)'}[statusKey];
 
   el.innerHTML = `
   <div class="card">
     <div class="card-header">
-      <div class="card-title">🔑 License Management</div>
-      <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;color:${statusColor};background:${statusBg};border:1px solid ${statusColor}33">
-        ${licStatus === 'active' || licStatus === 'open' ? '✓' : licStatus === 'expiring' ? '⚠' : '✕'} ${statusLabel}
+      <div>
+        <div class="card-title">🔑 License Management</div>
+        <div class="card-sub" style="margin-top:3px">Manage the license key for this PlantVisit installation</div>
+      </div>
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;
+        border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.2px;
+        color:${statusColor};background:${statusColor}18;border:1px solid ${statusColor}44">
+        ${statusKey==='active'||statusKey==='open'?'✓':statusKey==='expiring'?'⚠':'✕'} ${statusLabel}
       </span>
     </div>
 
@@ -4065,16 +4067,17 @@ function renderLicenseSettings(el) {
       <div class="settings-row">
         <div>
           <div class="settings-row-label">License Key</div>
-          <div class="settings-row-sub">Enter the key provided by your developer. Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited open license.</div>
+          <div class="settings-row-sub">Key provided by your developer. Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited.</div>
         </div>
         <div class="settings-row-right">
-          <input type="text" class="settings-input mono" id="lic_key" placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off">
+          <input type="text" class="settings-input mono" id="lic_key"
+            placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off" spellcheck="false">
         </div>
       </div>
       <div class="settings-row">
         <div>
           <div class="settings-row-label">Organisation / Client Name</div>
-          <div class="settings-row-sub">Shown in the panel header and license status</div>
+          <div class="settings-row-sub">Shown in license status and developer panel</div>
         </div>
         <div class="settings-row-right">
           <input type="text" class="settings-input" id="lic_org" placeholder="Company name" value="${xe(org)}">
@@ -4087,7 +4090,7 @@ function renderLicenseSettings(el) {
       <div class="settings-row">
         <div>
           <div class="settings-row-label">License Expiry Date</div>
-          <div class="settings-row-sub">Leave blank for no expiry. App warns 30 days before.</div>
+          <div class="settings-row-sub">Leave blank for no expiry. App warns users 30 days before.</div>
         </div>
         <div class="settings-row-right">
           <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}">
@@ -4096,86 +4099,91 @@ function renderLicenseSettings(el) {
       <div class="settings-row">
         <div>
           <div class="settings-row-label">Maximum Seats</div>
-          <div class="settings-row-sub">Concurrent licensed users. Use 999 for unlimited.</div>
+          <div class="settings-row-sub">Max concurrent licensed users. 999 = unlimited.</div>
         </div>
         <div class="settings-row-right">
-          <input type="number" class="settings-input" id="lic_seats" value="${xe(seats)}" min="1" max="9999" placeholder="999" style="width:120px">
+          <input type="number" class="settings-input" id="lic_seats"
+            value="${xe(String(seats))}" min="1" max="9999" placeholder="999" style="width:130px">
         </div>
       </div>
     </div>
 
     ${expiry ? `
-    <div class="alert ${licValid ? (daysLeft <= 30 ? 'alert-warn' : 'alert-success') : 'alert-warn'}" style="margin-bottom:0;margin-top:4px">
-      ${licValid
-        ? (daysLeft <= 30
-          ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>. Contact your developer to renew.`
-          : `✅ License valid — expires ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} (${daysLeft} days remaining).`)
+    <div class="alert ${valid?(daysLeft<=30?'alert-warn':'alert-success'):'alert-warn'}" style="margin-top:4px">
+      ${valid
+        ? (daysLeft<=30
+            ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>. Contact your developer to renew.`
+            : `✅ Valid — expires ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} (${daysLeft} days remaining).`)
         : `✕ License expired on ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}. Contact your developer to renew.`}
     </div>` : ''}
 
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>
-      <button class="btn btn-gold" onclick="saveLicenseSettings()">✓ Save License</button>
+      <button class="btn btn-gold"  onclick="saveLicenseSettings()">✓ Save License</button>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header"><div class="card-title">License Status</div></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
-        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Status</div>
-        <div style="font-size:15px;font-weight:700;color:${statusColor}">${statusLabel}</div>
+    <div class="card-header"><div class="card-title">Current License Status</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px">
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Status</div>
+        <div style="font-size:14px;font-weight:700;color:${statusColor}">${statusLabel}</div>
       </div>
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
-        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Days Left</div>
-        <div style="font-size:15px;font-weight:700;color:var(--white)">${daysLeft !== null ? daysLeft : '∞'}</div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Days Left</div>
+        <div style="font-size:14px;font-weight:700;color:var(--white)">${daysLeft!==null?daysLeft:'∞'}</div>
       </div>
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
-        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Max Seats</div>
-        <div style="font-size:15px;font-weight:700;color:var(--white)">${parseInt(seats) >= 999 ? '∞' : seats}</div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Seats</div>
+        <div style="font-size:14px;font-weight:700;color:var(--white)">${seats>=999?'∞':seats}</div>
       </div>
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center">
-        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Key</div>
-        <div style="font-size:12px;font-weight:600;color:var(--white);font-family:monospace">${key.length > 12 ? key.slice(0,12)+'…' : key}</div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Key</div>
+        <div style="font-size:12px;font-weight:600;color:var(--white);font-family:monospace;word-break:break-all">${key.length>14?key.slice(0,14)+'…':key}</div>
       </div>
     </div>
     <div class="alert alert-info" style="margin-top:14px">
-      ℹ License settings are stored locally on this device. The developer can also manage licensing via the separate <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">licensing.html</code> panel.
+      ℹ License settings are stored locally on this device (browser localStorage).
+      The developer can also manage licensing via the separate
+      <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">licensing.html</code> panel.
+      Both share the same storage keys.
     </div>
   </div>`;
 }
 
 function saveLicenseSettings() {
-  const key    = (document.getElementById('lic_key')?.value  || '').trim() || 'OPEN';
-  const org    = (document.getElementById('lic_org')?.value  || '').trim();
-  const expiry = document.getElementById('lic_exp')?.value   || '';
-  const seats  = document.getElementById('lic_seats')?.value || '999';
+  const key    = (document.getElementById('lic_key')?.value    || '').trim() || 'OPEN';
+  const org    = (document.getElementById('lic_org')?.value    || '').trim();
+  const expiry =  document.getElementById('lic_exp')?.value    || '';
+  const seats  =  parseInt(document.getElementById('lic_seats')?.value || '999', 10) || 999;
 
   if (expiry && new Date(expiry) < new Date()) {
-    toast('⚠ Invalid Expiry', 'The expiry date is already in the past. License will appear expired.', true);
+    toast('⚠ Expiry in Past', 'The expiry date is already past — license will show as expired.', true);
   }
 
+  // Persist to localStorage
   localStorage.setItem('pv_lic_key',   key);
   localStorage.setItem('pv_lic_org',   org);
   localStorage.setItem('pv_lic_exp',   expiry);
-  localStorage.setItem('pv_lic_seats', seats);
+  localStorage.setItem('pv_lic_seats', String(seats));
 
-  // Update in-memory _LIC state immediately
+  // Update in-memory _LIC immediately (no reload needed)
   _LIC.key    = key;
   _LIC.org    = org;
   _LIC.expiry = expiry;
-  _LIC.seats  = parseInt(seats, 10);
+  _LIC.seats  = seats;
   _LIC.valid  = !expiry || new Date(expiry) >= new Date();
 
-  toast('✓ License Saved', 'License settings updated. Reload to fully apply.');
-  // Re-render the tab to show updated status
+  toast('✓ License Saved', 'License settings updated successfully.');
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
 function clearLicenseSettings() {
-  if (!confirm('Clear license settings? The installation will revert to open/unlimited mode.')) return;
+  if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode.')) return;
   ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
-  _LIC.key = 'OPEN'; _LIC.expiry = ''; _LIC.valid = true; _LIC.seats = 999;
+  _LIC.key = 'OPEN'; _LIC.org = 'PlantVisit Installation';
+  _LIC.expiry = ''; _LIC.seats = 999; _LIC.valid = true;
   toast('License Cleared', 'Reset to open/unlimited mode.');
   renderLicenseSettings(document.getElementById('settingsContent'));
 }
