@@ -748,7 +748,7 @@ tr.bulk-selected td{background:rgba(224,85,85,.07) !important}
 .settings-tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 20px;cursor:pointer;font-size:13px;color:var(--slate);font-family:var(--font);font-weight:400;white-space:nowrap;transition:all .15s}
 .settings-tab:hover{color:var(--white2)}
 .settings-tab.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:500}
-#devPanelModal .settings-tab{padding:10px 13px;font-size:12px}
+#devPanelModal .settings-tab{padding:9px 11px;font-size:11.5px;flex-shrink:0;border-bottom-width:2px;border-bottom-style:solid;border-bottom-color:transparent}
 
 /* ─── SETTINGS SECTION ───────────────────────────────── */
 .settings-section{margin-bottom:24px}
@@ -1110,7 +1110,7 @@ html.guest-direct-link #mainContent { display: block !important; }
       <button onclick="closeDevPanel()" style="background:none;border:none;color:var(--slate);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:var(--radius);transition:color .15s" onmouseover="this.style.color='var(--white)'" onmouseout="this.style.color='var(--slate)'">✕</button>
     </div>
     <!-- Modal tabs -->
-    <div style="display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto;flex-wrap:nowrap">
+    <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 12px;flex-wrap:wrap">
       <button id="devTab-azure"         class="settings-tab active" onclick="switchDevTab('azure')">🔗 Microsoft Graph API</button>
       <button id="devTab-notifications" class="settings-tab"        onclick="switchDevTab('notifications')">🔔 Notifications</button>
       <button id="devTab-plants"        class="settings-tab"        onclick="switchDevTab('plants')">🏭 Plants</button>
