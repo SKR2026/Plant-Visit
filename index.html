@@ -3628,38 +3628,15 @@ function copyDirectLink(link) {
 ══════════════════════════════════════════════════════════ */
 let _settingsActiveTab = 'azure';
 
-function _licStatusBadge() {
-  const expiry   = _LIC.expiry || '';
-  const daysLeft = expiry ? Math.ceil((new Date(expiry) - new Date()) / 86400000) : null;
-  const valid    = _LIC.valid !== false && (!expiry || daysLeft > 0);
-  const isOpen   = (!expiry && (_LIC.key === 'OPEN' || !_LIC.key));
-
-  if (isOpen) return `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;color:var(--purple);background:var(--purple-bg);border:1px solid rgba(155,114,232,.3)" title="No expiry set — open/unlimited">🔑 License: Unlimited</span>`;
-
-  const color = !valid ? 'var(--red)' : daysLeft <= 30 ? 'var(--orange)' : 'var(--green)';
-  const bg    = !valid ? 'var(--red-bg)' : daysLeft <= 30 ? 'var(--orange-bg)' : 'var(--green-bg)';
-  const bdr   = !valid ? 'rgba(224,85,85,.3)' : daysLeft <= 30 ? 'rgba(224,133,64,.3)' : 'rgba(90,191,122,.3)';
-  const icon  = !valid ? '✕' : daysLeft <= 30 ? '⚠' : '✓';
-  const expFmt = new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
-  const daysTxt = daysLeft !== null ? (daysLeft > 0 ? daysLeft + 'd left' : 'Expired') : '';
-
-  return `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;color:${color};background:${bg};border:1px solid ${bdr}" title="License expiry: ${expFmt}">${icon} License: ${expFmt} · ${daysTxt}</span>`;
-}
-
 function renderSettings(el) {
   if (currentUser.access !== 'admin') {
     el.innerHTML = `<div class="alert alert-warn">⚠ Settings are only accessible to administrators.</div>`;
     return;
   }
-  // Guard: if active tab was 'license' (now removed), fall back to 'azure'
-  if (_settingsActiveTab === 'license') _settingsActiveTab = 'azure';
   el.innerHTML = `
   <div class="section-header">
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <div class="section-title">Admin Settings</div>
-      <div class="section-sub">Configure system, Azure, and user management</div>
-    </div>
-    <div style="margin-left:auto">${_licStatusBadge()}</div>
+    <div class="section-title">Admin Settings</div>
+    <div class="section-sub">Configure system, Azure, and user management</div>
   </div>
   <div class="settings-tabs">
     <button class="settings-tab${_settingsActiveTab==='azure'?' active':''}" onclick="switchSettingsTab('azure')">🔗 Microsoft Graph API</button>
@@ -3668,6 +3645,7 @@ function renderSettings(el) {
     <button class="settings-tab${_settingsActiveTab==='categories'?' active':''}" onclick="switchSettingsTab('categories')">📋 Categories</button>
     <button class="settings-tab${_settingsActiveTab==='users'?' active':''}" onclick="switchSettingsTab('users')">👥 User Management</button>
     <button class="settings-tab${_settingsActiveTab==='app'?' active':''}" onclick="switchSettingsTab('app')">⚙ App Config</button>
+    <button class="settings-tab${_settingsActiveTab==='license'?' active':''}" onclick="switchSettingsTab('license')">🔑 License</button>
   </div>
   <div id="settingsContent"></div>`;
   renderSettingsTab();
@@ -3687,6 +3665,7 @@ function renderSettingsTab() {
   else if (_settingsActiveTab === 'categories') renderCategorySettings(el);
   else if (_settingsActiveTab === 'users') renderUserManagement(el);
   else if (_settingsActiveTab === 'app') renderAppSettings(el);
+  else if (_settingsActiveTab === 'license') renderLicenseSettings(el);
 }
 
 function renderAzureSettings(el) {
@@ -4292,8 +4271,7 @@ function renderAppSettings(el) {
     <div style="display:flex;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <button class="btn btn-gold" onclick="saveAppSettings()">✓ Save App Config</button>
     </div>
-  </div>
-  ${renderLicenseStatusCard()}`;
+  </div>`;
 }
 
 function saveAppSettings() {
@@ -4303,71 +4281,162 @@ function saveAppSettings() {
   };
   saveSettings();
   toast('✓ App Config Saved', 'Application settings updated.');
-  // Re-render to refresh the license status card
-  renderAppSettings(document.getElementById('settingsContent'));
 }
 
 /* ══════════════════════════════════════════════════════════
-   LICENSE STATUS  — read-only view embedded in App Config
-   (full license management is in the Developer Panel only)
+   LICENSE SETTINGS  (Settings → 🔑 License)
+   Super Admin only — writes to localStorage so _LIC picks
+   up the values on next load. Developer can also manage via
+   licensing.html. Both share the same pv_lic_* keys.
 ══════════════════════════════════════════════════════════ */
-function renderLicenseStatusCard() {
-  const expiry   = _LIC.expiry || '';
+function renderLicenseSettings(el) {
+  const key    = _LIC.key    || 'OPEN';
+  const expiry = _LIC.expiry || '';
+  const org    = _LIC.org    || '';
+  const seats  = _LIC.seats  || 999;
   const daysLeft = expiry ? Math.ceil((new Date(expiry) - new Date()) / 86400000) : null;
   const valid    = _LIC.valid !== false && (!expiry || daysLeft > 0);
-  const isOpen   = !expiry && (_LIC.key === 'OPEN' || !_LIC.key);
 
-  const statusKey   = isOpen ? 'open' : !valid ? 'expired' : (daysLeft !== null && daysLeft <= 30) ? 'expiring' : 'active';
-  const statusLabel = { open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired' }[statusKey];
-  const statusColor = { open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)' }[statusKey];
-  const icon        = statusKey === 'expired' ? '✕' : statusKey === 'expiring' ? '⚠' : '✓';
+  const statusKey   = (key==='OPEN'&&!expiry) ? 'open' : !valid ? 'expired' : (daysLeft!==null&&daysLeft<=30) ? 'expiring' : 'active';
+  const statusLabel = {open:'Open / Unlimited', active:'Active', expiring:'Expiring Soon', expired:'Expired'}[statusKey];
+  const statusColor = {open:'var(--purple)', active:'var(--green)', expiring:'var(--orange)', expired:'var(--red)'}[statusKey];
 
-  const expFmt   = expiry ? new Date(expiry).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
-  const daysDisp = daysLeft !== null ? (daysLeft > 0 ? daysLeft + ' day' + (daysLeft !== 1 ? 's' : '') : 'Expired') : '∞';
-
-  const alertClass = !valid ? 'alert-warn' : daysLeft !== null && daysLeft <= 30 ? 'alert-warn' : '';
-  const alertMsg   = isOpen
-    ? ''
-    : !valid
-      ? `✕ License expired on <strong>${expFmt}</strong>. Contact your developer to renew.`
-      : daysLeft !== null && daysLeft <= 30
-        ? `⚠ License expires in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong>. Contact your developer to renew.`
-        : '';
-
-  return `
-  <div class="card" style="margin-top:20px">
+  el.innerHTML = `
+  <div class="card">
     <div class="card-header">
       <div>
-        <div class="card-title">🔑 License Status</div>
-        <div class="card-sub" style="margin-top:3px">Read-only — contact your developer to modify license details</div>
+        <div class="card-title">🔑 License Management</div>
+        <div class="card-sub" style="margin-top:3px">Manage the license key for this PlantVisit installation</div>
       </div>
-      <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;
-        font-size:11px;font-weight:700;color:${statusColor};background:${statusColor}18;border:1px solid ${statusColor}44">
-        ${icon} ${statusLabel}
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;
+        border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.2px;
+        color:${statusColor};background:${statusColor}18;border:1px solid ${statusColor}44">
+        ${statusKey==='active'||statusKey==='open'?'✓':statusKey==='expiring'?'⚠':'✕'} ${statusLabel}
       </span>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:4px">
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
-        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Expiry Date</div>
-        <div style="font-size:15px;font-weight:700;color:var(--white)">${expiry ? expFmt : 'No expiry'}</div>
+    <div class="settings-section">
+      <div class="settings-section-title">License Key</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">License Key</div>
+          <div class="settings-row-sub">Key provided by your developer. Use <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">OPEN</code> for unlimited.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="text" class="settings-input mono" id="lic_key"
+            placeholder="PV-XXXX-XXXX-XXXX or OPEN" value="${xe(key)}" autocomplete="off" spellcheck="false">
+        </div>
       </div>
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
-        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Days Remaining</div>
-        <div style="font-size:15px;font-weight:700;color:${statusColor}">${daysDisp}</div>
-      </div>
-      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
-        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Status</div>
-        <div style="font-size:15px;font-weight:700;color:${statusColor}">${statusLabel}</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Organisation / Client Name</div>
+          <div class="settings-row-sub">Shown in license status and developer panel</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="text" class="settings-input" id="lic_org" placeholder="Company name" value="${xe(org)}">
+        </div>
       </div>
     </div>
 
-    ${alertMsg ? `<div class="alert ${alertClass}" style="margin-top:14px">${alertMsg}</div>` : ''}
+    <div class="settings-section">
+      <div class="settings-section-title">Expiry &amp; Seat Limit</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">License Expiry Date</div>
+          <div class="settings-row-sub">Leave blank for no expiry. App warns users 30 days before.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="date" class="settings-input" id="lic_exp" value="${xe(expiry)}">
+        </div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Maximum Seats</div>
+          <div class="settings-row-sub">Max concurrent licensed users. 999 = unlimited.</div>
+        </div>
+        <div class="settings-row-right">
+          <input type="number" class="settings-input" id="lic_seats"
+            value="${xe(String(seats))}" min="1" max="9999" placeholder="999" style="width:130px">
+        </div>
+      </div>
+    </div>
 
-    <div class="alert alert-info" style="margin-top:${alertMsg?'8px':'14px'}">
-      ℹ License key and expiry are managed by the developer. To update license details, use the Developer Panel (⚙ Dev button) or contact your system administrator.
+    ${expiry ? `
+    <div class="alert ${valid?(daysLeft<=30?'alert-warn':'alert-success'):'alert-warn'}" style="margin-top:4px">
+      ${valid
+        ? (daysLeft<=30
+            ? `⚠ License expires in <strong>${daysLeft} day${daysLeft!==1?'s':''}</strong>. Contact your developer to renew.`
+            : `✅ Valid — expires ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})} (${daysLeft} days remaining).`)
+        : `✕ License expired on ${new Date(expiry).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}. Contact your developer to renew.`}
+    </div>` : ''}
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <button class="btn btn-ghost" onclick="clearLicenseSettings()">✕ Clear License</button>
+      <button class="btn btn-gold"  onclick="saveLicenseSettings()">✓ Save License</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">Current License Status</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px">
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Status</div>
+        <div style="font-size:14px;font-weight:700;color:${statusColor}">${statusLabel}</div>
+      </div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Days Left</div>
+        <div style="font-size:14px;font-weight:700;color:var(--white)">${daysLeft!==null?daysLeft:'∞'}</div>
+      </div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Seats</div>
+        <div style="font-size:14px;font-weight:700;color:var(--white)">${seats>=999?'∞':seats}</div>
+      </div>
+      <div style="background:var(--navy3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Key</div>
+        <div style="font-size:12px;font-weight:600;color:var(--white);font-family:monospace;word-break:break-all">${key.length>14?key.slice(0,14)+'…':key}</div>
+      </div>
+    </div>
+    <div class="alert alert-info" style="margin-top:14px">
+      ℹ License settings are stored locally on this device (browser localStorage).
+      The developer can also manage licensing via the separate
+      <code style="font-size:10px;background:var(--navy4);padding:1px 5px;border-radius:3px">licensing.html</code> panel.
+      Both share the same storage keys.
     </div>
   </div>`;
+}
+
+function saveLicenseSettings() {
+  const key    = (document.getElementById('lic_key')?.value    || '').trim() || 'OPEN';
+  const org    = (document.getElementById('lic_org')?.value    || '').trim();
+  const expiry =  document.getElementById('lic_exp')?.value    || '';
+  const seats  =  parseInt(document.getElementById('lic_seats')?.value || '999', 10) || 999;
+
+  if (expiry && new Date(expiry) < new Date()) {
+    toast('⚠ Expiry in Past', 'The expiry date is already past — license will show as expired.', true);
+  }
+
+  localStorage.setItem('pv_lic_key',   key);
+  localStorage.setItem('pv_lic_org',   org);
+  localStorage.setItem('pv_lic_exp',   expiry);
+  localStorage.setItem('pv_lic_seats', String(seats));
+
+  _LIC.key    = key;
+  _LIC.org    = org;
+  _LIC.expiry = expiry;
+  _LIC.seats  = seats;
+  _LIC.valid  = !expiry || new Date(expiry) >= new Date();
+
+  toast('✓ License Saved', 'License settings updated successfully.');
+  renderLicenseSettings(document.getElementById('settingsContent'));
+}
+
+function clearLicenseSettings() {
+  if (!confirm('Clear license settings?\n\nThis will revert to open/unlimited mode.')) return;
+  ['pv_lic_key','pv_lic_org','pv_lic_exp','pv_lic_seats'].forEach(k => localStorage.removeItem(k));
+  _LIC.key = 'OPEN'; _LIC.org = 'PlantVisit Installation';
+  _LIC.expiry = ''; _LIC.seats = 999; _LIC.valid = true;
+  toast('License Cleared', 'Reset to open/unlimited mode.');
+  renderLicenseSettings(document.getElementById('settingsContent'));
 }
 
 
